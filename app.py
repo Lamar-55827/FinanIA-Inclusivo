@@ -1,255 +1,292 @@
-
 import streamlit as st
 import pandas as pd
 from datetime import date
-import random
 
-st.set_page_config(page_title="FinanIA Inclusivo", page_icon="💜", layout="wide")
+st.set_page_config(page_title="FinanIA Inclusivo", page_icon="🌈", layout="wide")
 
-# ---------- Estado ----------
-defaults = {
+# Estado de la sesión: los datos son temporales y pueden reiniciarse.
+DEFAULTS = {
     "movimientos": [],
-    "meta_nombre": "Mi primera meta",
-    "meta_total": 500.0,
-    "meta_actual": 0.0,
-    "letra": "Mediana",
-    "contraste": "Suave",
-    "instrucciones": True,
-    "edad": "Prefiero elegir mis actividades",
+    "meta_ahorro": 500.0,
+    "ahorro_actual": 0.0,
     "nombre": "",
-    "reto_puntos": 0,
-    "retos_completados": [],
+    "tamano_letra": "Mediana",
+    "alto_contraste": False,
+    "mostrar_pistas": True,
+    "modo_demo": True,
 }
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-# ---------- Estilos ----------
-st.markdown("""
+# Apariencia accesible
+font_sizes = {"Pequeña": 16, "Mediana": 18, "Grande": 21, "Muy grande": 24}
+font_px = font_sizes[st.session_state.tamano_letra]
+if st.session_state.alto_contraste:
+    bg, fg, card, border = "#101820", "#FFFFFF", "#202D38", "#FFFFFF"
+else:
+    bg, fg, card, border = "#FBF8FF", "#263238", "#FFFFFF", "#DDD6EA"
+
+st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
-html, body, [class*="css"] { font-family: 'Nunito', sans-serif; }
-:root { --ink:#27304b; --muted:#68718a; --purple:#6c4bd8; --pink:#f4a7c4; --mint:#a8e6cf; --yellow:#ffe49a; }
-.block-container {padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1200px;}
-.hero {
- background: linear-gradient(120deg,#eee8ff 0%,#fff0f5 52%,#e6fbf4 100%);
- border: 1px solid #e7ddff; border-radius: 26px; padding: 28px 30px; margin-bottom: 18px;
-}
-.hero h1 {color:#39276f; font-size:2.25rem; margin:0 0 8px 0; font-weight:900;}
-.hero p {color:#4f5670; font-size:1.08rem; margin:0;}
-.card {
- background:#ffffff; border:1px solid #e9e8f2; border-radius:20px; padding:18px 20px;
- box-shadow:0 4px 14px rgba(54,44,100,.05); min-height:120px;
-}
-.card h3 {margin:0 0 6px 0; color:#34265f; font-size:1.12rem;}
-.card p {margin:0; color:#68718a;}
-.pill {display:inline-block; padding:5px 11px; border-radius:99px; background:#f0ebff; color:#5639b5; font-weight:800; font-size:.82rem;}
-.small-muted {color:#68718a; font-size:.92rem;}
-div.stButton > button {border-radius:14px; min-height:2.8rem; font-weight:800; border:1px solid #d9d1f5;}
-div.stButton > button[kind="primary"] {background:#6c4bd8; color:white; border:0;}
-div[data-testid="stMetric"] {background:#fbfaff; border:1px solid #ece7fb; padding:14px; border-radius:16px;}
-[data-testid="stSidebar"] {background:linear-gradient(180deg,#f5f1ff,#fff8fb);}
-h1,h2,h3 {color:#34265f;}
+.stApp {{ background: {bg}; color: {fg}; }}
+html, body, [class*="st-"], p, label, li {{ font-size: {font_px}px; }}
+.block-container {{ max-width: 1180px; padding-top: 1.4rem; padding-bottom: 3rem; }}
+.finania-hero {{ background: linear-gradient(120deg,#DCCBFF,#BDEFE7);
+color:#24313A; padding:1.35rem 1.5rem; border-radius:20px; margin-bottom:1rem; }}
+.finania-card {{ background:{card}; color:{fg}; border:1px solid {border};
+border-radius:16px; padding:1rem; min-height:120px; }}
+div.stButton > button, div.stFormSubmitButton > button {{
+min-height:2.8rem; border-radius:12px; font-weight:600; }}
 </style>
 """, unsafe_allow_html=True)
 
-if st.session_state.contraste == "Alto":
-    st.markdown("""<style>
-    .card {border:2px solid #34304a; box-shadow:none;}
-    .hero {border:2px solid #34304a;}
-    p, label, .small-muted {color:#202033 !important;}
-    </style>""", unsafe_allow_html=True)
+def money(value):
+    return f"${value:,.2f} MXN"
 
-font_css = {"Pequeña":"16px", "Mediana":"18px", "Grande":"21px", "Muy grande":"24px"}[st.session_state.letra]
-st.markdown(f"<style>html, body, [class*='css'] {{font-size:{font_css};}}</style>", unsafe_allow_html=True)
+def hint(message):
+    if st.session_state.mostrar_pistas:
+        st.info("**Paso a paso:** " + message)
 
-# ---------- Utilidades ----------
-def money(n):
-    return f"${n:,.2f}"
+def totals():
+    income = sum(x["cantidad"] for x in st.session_state.movimientos if x["tipo"] == "Ingreso")
+    expense = sum(x["cantidad"] for x in st.session_state.movimientos if x["tipo"] == "Gasto")
+    return income, expense, income - expense
 
-def hero(title, subtitle, emoji="💜"):
-    st.markdown(f"""
-    <div class="hero">
-      <div style="font-size:2.2rem">{emoji}</div>
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </div>""", unsafe_allow_html=True)
+def add_movement(kind, concept, category, amount):
+    st.session_state.movimientos.append({
+        "Fecha": str(date.today()),
+        "Tipo": kind,
+        "Concepto": concept or category,
+        "Categoría": category,
+        "Cantidad": float(amount),
+    })
 
-def card(title, desc, emoji):
-    st.markdown(f"""<div class="card"><div style="font-size:2rem">{emoji}</div>
-    <h3>{title}</h3><p>{desc}</p></div>""", unsafe_allow_html=True)
+st.markdown("""
+<div class="finania-hero">
+<h1>🌈 FinanIA Inclusivo</h1>
+<h3>Aprender sobre el dinero, paso a paso y a tu propio ritmo.</h3>
+<p>Explora, practica y vuelve a intentar cuando lo necesites. No hay prisa.</p>
+</div>
+""", unsafe_allow_html=True)
 
-def hint(text):
-    if st.session_state.instrucciones:
-        st.info("💡 **Paso a paso:** " + text)
+st.sidebar.title("🌈 FinanIA Inclusivo")
+st.sidebar.caption("Tu espacio para aprender sobre el dinero")
+if st.session_state.nombre.strip():
+    st.sidebar.write(f"¡Hola, {st.session_state.nombre.strip()}!")
 
-# ---------- Barra lateral ----------
-with st.sidebar:
-    st.markdown("## 💜 FinanIA")
-    st.caption("Aprendo sobre el dinero a mi ritmo")
-    if st.session_state.nombre:
-        st.write(f"¡Hola, {st.session_state.nombre}!")
-    page = st.radio(
-        "¿A dónde quieres ir?",
-        ["🏠 Inicio", "🪙 Conozco el dinero", "🛍️ Practico compras",
-         "📊 Organizo mi dinero", "🌱 Mi ahorro", "🎮 Retos y juegos", "⚙️ Mi experiencia"],
-        label_visibility="visible"
-    )
-    st.divider()
-    st.caption("Puedes cambiar de sección cuando quieras.")
-    st.caption("No hay límite de tiempo. Puedes repetir las actividades.")
+section = st.sidebar.radio("Elige una sección:", [
+    "🏠 Inicio", "🪙 Conozco el dinero", "🛍️ Practico compras",
+    "📊 Organizo mi dinero", "🌱 Mi ahorro", "🎮 Retos y juegos",
+    "💬 Ayuda FinanIA", "⚙️ Mi experiencia"
+])
 
-# ---------- Inicio ----------
-if page == "🏠 Inicio":
-    hero("¡Bienvenido a FinanIA!", "Un espacio para aprender a usar el dinero, tomar decisiones y avanzar a tu propio ritmo.", "🌈")
-    c1, c2 = st.columns([1.4,1])
-    with c1:
-        st.subheader("¿Qué te gustaría aprender hoy?")
-        st.write("Elige una actividad. No necesitas hacerlas todas ni seguir un orden.")
-        a,b = st.columns(2)
-        with a:
-            card("Conocer el dinero","Identifica monedas, billetes y cantidades.","🪙")
-            card("Practicar compras","Simula compras y calcula el cambio.","🛍️")
-            card("Organizar mi dinero","Registra entradas, gastos y revisa tu saldo.","📊")
-        with b:
-            card("Aprender a ahorrar","Crea una meta y observa tu progreso.","🌱")
-            card("Jugar y practicar","Resuelve pequeños retos financieros.","🎮")
-            card("Personalizar","Ajusta letra, contraste e instrucciones.","⚙️")
-    with c2:
-        st.subheader("Mi resumen")
-        ingresos = sum(x["cantidad"] for x in st.session_state.movimientos if x["tipo"]=="Ingreso")
-        gastos = sum(x["cantidad"] for x in st.session_state.movimientos if x["tipo"]=="Gasto")
-        st.metric("Dinero que tengo registrado", money(ingresos-gastos))
-        st.metric("Retos completados", len(st.session_state.retos_completados))
-        st.metric("Progreso de ahorro", f"{min(100, st.session_state.meta_actual/max(st.session_state.meta_total,1)*100):.0f}%")
-        st.markdown('<div class="card"><h3>🌟 Recuerda</h3><p>Aprender lleva tiempo. Puedes pedir ayuda, descansar o volver a intentar cuando quieras.</p></div>', unsafe_allow_html=True)
-    st.caption("FinanIA es una herramienta educativa. Utiliza cantidades de ejemplo; no conecta con bancos ni realiza pagos.")
+# Modo demostración: carga datos ficticios para una presentación.
+st.sidebar.divider()
+demo_choice = st.sidebar.toggle("Cargar ejemplo de demostración", value=False)
+if demo_choice and not st.session_state.modo_demo:
+    st.session_state.movimientos = [
+        {"Fecha": str(date.today()), "Tipo": "Ingreso", "Concepto": "Dinero de práctica",
+         "Categoría": "Otro", "Cantidad": 200.0},
+        {"Fecha": str(date.today()), "Tipo": "Gasto", "Concepto": "Cuaderno",
+         "Categoría": "Educación", "Cantidad": 35.0},
+    ]
+    st.session_state.ahorro_actual = 120.0
+    st.session_state.meta_ahorro = 300.0
+    st.session_state.modo_demo = True
+elif not demo_choice and st.session_state.modo_demo:
+    st.session_state.movimientos = []
+    st.session_state.ahorro_actual = 0.0
+    st.session_state.meta_ahorro = 500.0
+    st.session_state.modo_demo = False
 
-# ---------- Dinero ----------
-elif page == "🪙 Conozco el dinero":
-    hero("Conozco el dinero", "Vamos a reconocer cantidades y practicar sumas sencillas.", "🪙")
-    hint("Lee cada pregunta. Elige una respuesta y comprueba cómo te fue.")
-    st.subheader("Actividad 1. ¿Cuánto dinero hay?")
-    st.write("Imagina que tienes una moneda de $10 y otra de $5.")
-    answer = st.radio("¿Cuánto dinero tienes en total?", ["$5", "$10", "$15", "$20"], key="dinero_q1")
-    if st.button("Comprobar respuesta", key="check_money"):
-        if answer == "$15":
-            st.success("¡Correcto! $10 + $5 = $15. ¡Buen trabajo!")
+st.sidebar.caption("Los ejemplos son ficticios. Puedes desactivar el modo para empezar en blanco.")
+
+if section == "🏠 Inicio":
+    st.header("¡Bienvenido/a!")
+    st.write("Elige una actividad. Puedes comenzar por cualquiera y avanzar a tu ritmo.")
+    inc, exp, balance = totals()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("💰 Saldo de práctica", money(balance))
+    c2.metric("🌱 Ahorro registrado", money(st.session_state.ahorro_actual))
+    c3.metric("🎯 Meta de ahorro", money(st.session_state.meta_ahorro))
+    st.subheader("Explora los módulos")
+    cards = [
+        ("🪙 Conocer el dinero", "Reconocer cantidades y practicar sumas."),
+        ("🛍️ Practicar compras", "Elegir productos y calcular el cambio."),
+        ("📊 Organizar mi dinero", "Registrar ingresos y gastos."),
+        ("🌱 Ahorrar", "Crear una meta y observar el progreso."),
+        ("🎮 Retos y juegos", "Resolver situaciones cotidianas."),
+        ("💬 Ayuda FinanIA", "Consultar explicaciones sencillas."),
+    ]
+    cols = st.columns(3)
+    for i, (title, desc) in enumerate(cards):
+        with cols[i % 3]:
+            st.markdown(f'<div class="finania-card"><h4>{title}</h4><p>{desc}</p></div>', unsafe_allow_html=True)
+    st.success("Puedes repetir las actividades todas las veces que quieras.")
+
+elif section == "🪙 Conozco el dinero":
+    st.header("🪙 Conozco el dinero")
+    hint("Observa la tarjeta, elige la cantidad y presiona Comprobar.")
+    examples = {
+        "Una moneda de $5": 5, "Dos monedas de $10": 20,
+        "Un billete de $20": 20, "Un billete de $50": 50,
+        "Cinco monedas de $10": 50
+    }
+    item = st.selectbox("Observa esta representación:", list(examples.keys()))
+    st.subheader("💵 " + item)
+    answer = st.radio("¿Cuánto dinero representa?", [5, 10, 20, 30, 50, 100],
+                      horizontal=True, key="money_answer")
+    if st.button("Comprobar cantidad", key="check_money"):
+        if answer == examples[item]:
+            st.success("¡Correcto! Identificaste la cantidad. 🎉")
         else:
-            st.warning("No pasa nada. Inténtalo otra vez: suma 10 y 5.")
+            st.warning("Vuelve a mirar la representación e inténtalo otra vez.")
     st.divider()
-    st.subheader("Actividad 2. Completa la cantidad")
-    x = st.selectbox("Tienes $20. ¿Cuánto falta para llegar a $50?", ["Selecciona", "$10", "$20", "$30", "$40"], key="dinero_q2")
-    if st.button("Revisar", key="check_money2"):
-        if x == "$30": st.success("¡Así es! $20 + $30 = $50.")
-        else: st.info("Pista: piensa cuánto hay entre 20 y 50.")
+    st.subheader("➕ Practica una suma")
+    a, b = st.columns(2)
+    with a:
+        first = st.selectbox("Primera cantidad", [1, 2, 5, 10, 20], key="sum_first")
+    with b:
+        second = st.selectbox("Segunda cantidad", [1, 2, 5, 10, 20], key="sum_second")
+    result = st.number_input("Escribe el total", min_value=0, max_value=100, step=1, key="sum_result")
+    if st.button("Revisar suma", key="check_sum"):
+        if result == first + second:
+            st.success(f"¡Muy bien! {first} + {second} = {first + second}.")
+        else:
+            st.info(f"Pista: empieza con {first} y agrega {second}.")
 
-# ---------- Compras ----------
-elif page == "🛍️ Practico compras":
-    hero("Practico compras", "Haz una compra de práctica. Aquí no se utiliza dinero real.", "🛍️")
-    hint("Elige un producto, observa su precio y escribe cuánto dinero entregas.")
-    products = {"🍎 Manzana": 12, "🥪 Sándwich": 35, "📒 Cuaderno": 28, "🧃 Jugo": 18, "🧸 Pelota": 65}
+elif section == "🛍️ Practico compras":
+    st.header("🛍️ Practico compras")
+    hint("Selecciona un producto, revisa el precio y elige cuánto dinero entregas.")
+    products = {"🍎 Manzana": 12, "🥛 Leche": 24, "🍞 Pan": 18,
+                "📒 Cuaderno": 35, "🖍️ Colores": 42, "🧼 Jabón": 16}
     product = st.selectbox("¿Qué quieres comprar?", list(products.keys()))
     price = products[product]
-    st.markdown(f'<div class="card"><h3>{product}</h3><p>Precio de práctica</p><div style="font-size:2rem;font-weight:900;color:#6c4bd8">{money(price)}</div></div>', unsafe_allow_html=True)
-    paid = st.number_input("¿Cuánto dinero entregas?", min_value=0, max_value=1000, value=50, step=5)
-    if st.button("Calcular mi cambio", type="primary"):
+    st.metric("Precio", money(price))
+    paid = st.selectbox("¿Cuánto dinero entregas?", [10, 20, 50, 100, 200], index=2)
+    if st.button("Calcular cambio", key="calculate_change"):
         if paid < price:
-            st.warning(f"Te faltan {money(price-paid)} para pagar.")
+            st.error(f"Te faltan {money(price - paid)}.")
         else:
-            st.success(f"Tu cambio es {money(paid-price)}. ¡Compra completada!")
-    st.caption("Los precios son ejemplos para practicar.")
+            st.success(f"Tu cambio sería {money(paid - price)}. ¡Buen trabajo!")
+    st.caption("Simulación educativa: no realiza compras ni pagos reales.")
 
-# ---------- Administración ----------
-elif page == "📊 Organizo mi dinero":
-    hero("Organizo mi dinero", "Registra movimientos de ejemplo y observa cómo cambia tu saldo.", "📊")
-    hint("Selecciona si recibiste dinero o si gastaste. Después completa la descripción y la cantidad.")
+elif section == "📊 Organizo mi dinero":
+    st.header("📊 Organizo mi dinero")
+    hint("Completa los campos y presiona Guardar movimiento. Puedes usar datos ficticios.")
     with st.form("movement_form", clear_on_submit=True):
-        tipo = st.radio("Tipo de movimiento", ["Ingreso","Gasto"], horizontal=True)
-        desc = st.text_input("¿Qué ocurrió?", placeholder="Ej. Recibí dinero para transporte")
-        cantidad = st.number_input("Cantidad en pesos", min_value=0.0, value=0.0, step=10.0)
-        categoria = st.selectbox("Categoría", ["Alimentación","Transporte","Escuela","Hogar","Diversión","Regalo","Trabajo","Otro"])
-        submitted = st.form_submit_button("Guardar movimiento", type="primary")
-        if submitted:
-            if not desc.strip() or cantidad <= 0:
-                st.error("Escribe una descripción y una cantidad mayor que cero.")
-            else:
-                st.session_state.movimientos.append({"fecha":str(date.today()),"tipo":tipo,"descripcion":desc.strip(),"categoria":categoria,"cantidad":float(cantidad)})
-                st.success("Movimiento agregado a esta sesión.")
-    ingresos = sum(x["cantidad"] for x in st.session_state.movimientos if x["tipo"]=="Ingreso")
-    gastos = sum(x["cantidad"] for x in st.session_state.movimientos if x["tipo"]=="Gasto")
-    m1,m2,m3 = st.columns(3)
-    m1.metric("Ingresos",money(ingresos)); m2.metric("Gastos",money(gastos)); m3.metric("Saldo",money(ingresos-gastos))
+        kind = st.radio("Tipo de movimiento", ["Ingreso", "Gasto"], horizontal=True)
+        concept = st.text_input("Concepto", placeholder="Ej. dinero para transporte")
+        amount = st.number_input("Cantidad en pesos", min_value=0.0, step=1.0)
+        category = st.selectbox("Categoría", [
+            "Alimentación", "Transporte", "Educación", "Hogar",
+            "Diversión", "Salud", "Ahorro", "Otro"
+        ])
+        submitted = st.form_submit_button("Guardar movimiento")
+    if submitted:
+        if amount <= 0:
+            st.error("Escribe una cantidad mayor que cero.")
+        else:
+            add_movement(kind, concept.strip(), category, amount)
+            st.success("¡Movimiento guardado en esta sesión!")
+    inc, exp, balance = totals()
+    a, b, c = st.columns(3)
+    a.metric("Ingresos", money(inc))
+    b.metric("Gastos", money(exp))
+    c.metric("Diferencia", money(balance))
     if st.session_state.movimientos:
-        df = pd.DataFrame(st.session_state.movimientos)
         st.subheader("Mis movimientos")
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.bar_chart(df.groupby("tipo")["cantidad"].sum())
-        if st.button("Borrar movimientos de esta sesión"):
+        st.dataframe(pd.DataFrame(st.session_state.movimientos), use_container_width=True, hide_index=True)
+        if st.button("Borrar todos los movimientos", key="clear_movements"):
             st.session_state.movimientos = []
             st.rerun()
     else:
-        st.info("Todavía no hay movimientos. Agrega uno para comenzar.")
+        st.info("Todavía no hay movimientos. Agrega uno de práctica para comenzar.")
 
-# ---------- Ahorro ----------
-elif page == "🌱 Mi ahorro":
-    hero("Mi meta de ahorro", "Cada pequeño paso cuenta. Tú decides cuánto quieres reunir.", "🌱")
-    hint("Escribe el nombre de tu meta y la cantidad que quieres ahorrar. Luego agrega lo que llevas.")
-    with st.form("goal_form"):
-        name = st.text_input("¿Para qué quieres ahorrar?", value=st.session_state.meta_nombre)
-        total = st.number_input("¿Cuánto quieres reunir? ($)", min_value=1.0, value=float(st.session_state.meta_total), step=50.0)
-        actual = st.number_input("¿Cuánto has ahorrado? ($)", min_value=0.0, value=float(st.session_state.meta_actual), step=10.0)
-        save = st.form_submit_button("Actualizar mi meta", type="primary")
-        if save:
-            st.session_state.meta_nombre=name or "Mi meta"
-            st.session_state.meta_total=total
-            st.session_state.meta_actual=actual
-            st.success("¡Meta actualizada!")
-    total = max(float(st.session_state.meta_total),1)
-    current = float(st.session_state.meta_actual)
-    pct = min(1.0,current/total)
-    st.subheader(st.session_state.meta_nombre)
-    st.progress(pct)
-    st.markdown(f"**Llevas {money(current)} de {money(total)} ({pct*100:.0f}%).**")
-    st.info(f"Te faltan {money(max(0,total-current))} para alcanzar tu meta.")
+elif section == "🌱 Mi ahorro":
+    st.header("🌱 Mi ahorro")
+    hint("Define una meta y registra cuánto llevas ahorrado.")
+    goal = st.number_input("Mi meta de ahorro (pesos)", min_value=1.0,
+                           value=float(st.session_state.meta_ahorro), step=10.0)
+    saved = st.number_input("¿Cuánto llevo ahorrado? (pesos)", min_value=0.0,
+                            value=float(st.session_state.ahorro_actual), step=5.0)
+    st.session_state.meta_ahorro = goal
+    st.session_state.ahorro_actual = saved
+    progress = min(saved / goal, 1.0)
+    st.progress(progress)
+    st.write(f"Avance: **{progress * 100:.0f}%**")
+    remaining = max(goal - saved, 0)
+    if remaining == 0:
+        st.success("¡Meta alcanzada! ¡Felicidades! 🎉")
+    else:
+        st.info(f"Te faltan {money(remaining)} para llegar a tu meta.")
 
-# ---------- Retos ----------
-elif page == "🎮 Retos y juegos":
-    hero("Retos y juegos", "Practica con situaciones cotidianas. Puedes intentarlo todas las veces que quieras.", "🎮")
-    hint("Lee el reto, elige una respuesta y presiona comprobar.")
+elif section == "🎮 Retos y juegos":
+    st.header("🎮 Retos y juegos")
+    hint("Lee la situación, selecciona una respuesta y comprueba.")
     challenges = [
-        ("Tienes $100 y gastas $40. ¿Cuánto queda?", ["$40","$50","$60"], "$60", "100 - 40 = 60."),
-        ("Una libreta cuesta $25. Pagas con $50. ¿Cuál es el cambio?", ["$15","$25","$35"], "$25", "50 - 25 = 25."),
-        ("Quieres ahorrar $100. Ya tienes $70. ¿Cuánto falta?", ["$20","$30","$40"], "$30", "100 - 70 = 30."),
-        ("Un producto cuesta $45 y otro $39. ¿Cuál cuesta menos?", ["El de $45","El de $39","Cuestan igual"], "El de $39", "39 es menor que 45.")
+        ("Tienes $50 y compras algo que cuesta $30. ¿Cuánto queda?",
+         ["$10", "$20", "$30"], "$20", "50 - 30 = 20. Quedan $20."),
+        ("¿Cuál puede ser una necesidad básica?",
+         ["Agua", "Videojuego", "Juguete"], "Agua", "El agua es necesaria para vivir."),
+        ("Un producto cuesta $15. ¿Qué billete puede cubrir el precio?",
+         ["$10", "$20", "$5"], "$20", "Con $20 pagas $15 y recibes $5."),
+        ("Quieres ahorrar para una mochila. ¿Qué puede ayudarte?",
+         ["Gastar todo hoy", "Guardar una parte", "No revisar el precio"],
+         "Guardar una parte", "Guardar poco a poco ayuda a alcanzar una meta.")
     ]
-    idx = st.selectbox("Elige un reto", list(range(1,len(challenges)+1)), format_func=lambda x:f"Reto {x}")
-    q, opts, correct, explain = challenges[idx-1]
-    st.markdown(f'<div class="card"><span class="pill">RETO {idx}</span><h3 style="margin-top:12px">{q}</h3></div>', unsafe_allow_html=True)
-    response = st.radio("Tu respuesta",opts,key=f"challenge_{idx}")
-    if st.button("Comprobar reto",type="primary"):
-        if response == correct:
-            st.success("¡Muy bien! " + explain)
-            if idx not in st.session_state.retos_completados:
-                st.session_state.retos_completados.append(idx)
-                st.session_state.reto_puntos += 1
-        else:
-            st.warning("Puedes volver a intentarlo. Pista: " + explain)
-    st.metric("Retos resueltos",f"{len(st.session_state.retos_completados)} de {len(challenges)}")
-    st.caption("Los puntos son una forma de reconocer la práctica, no una calificación.")
+    for idx, (question, options, correct, explanation) in enumerate(challenges, start=1):
+        with st.container(border=True):
+            st.markdown(f"**Reto {idx}**")
+            st.write(question)
+            choice = st.radio("Selecciona una respuesta:", options,
+                              key=f"challenge_choice_{idx}", label_visibility="collapsed")
+            if st.button("Comprobar respuesta", key=f"challenge_check_{idx}"):
+                if choice == correct:
+                    st.success("¡Respuesta correcta! 🌟 " + explanation)
+                else:
+                    st.warning("Puedes volver a intentarlo. Pista: " + explanation)
 
-# ---------- Preferencias ----------
-elif page == "⚙️ Mi experiencia":
-    hero("Mi experiencia", "Ajusta la aplicación para que sea más cómoda para ti.", "⚙️")
-    st.subheader("Ajustes de lectura")
-    st.session_state.letra = st.radio("Tamaño de letra",["Pequeña","Mediana","Grande","Muy grande"],index=["Pequeña","Mediana","Grande","Muy grande"].index(st.session_state.letra),horizontal=True)
-    st.session_state.contraste = st.radio("Contraste",["Suave","Alto"],index=["Suave","Alto"].index(st.session_state.contraste),horizontal=True)
-    st.session_state.instrucciones = st.toggle("Mostrar instrucciones paso a paso",value=st.session_state.instrucciones)
-    st.subheader("Preferencias de aprendizaje")
-    st.session_state.edad = st.selectbox("¿Qué opción describe mejor lo que buscas?",["Prefiero elegir mis actividades","Actividades para niñas y niños","Actividades para adolescentes","Actividades para personas adultas"],index=["Prefiero elegir mis actividades","Actividades para niñas y niños","Actividades para adolescentes","Actividades para personas adultas"].index(st.session_state.edad))
-    st.text_input("¿Cómo te gustaría que te llamemos? (opcional)",key="nombre")
-    st.success("Tus ajustes se aplican durante esta sesión.")
-    st.caption("Puedes cambiar estas opciones en cualquier momento. No hay una única forma correcta de aprender.")
+elif section == "💬 Ayuda FinanIA":
+    st.header("💬 Ayuda FinanIA")
+    st.write("Escribe una pregunta. Esta versión usa explicaciones educativas preparadas; no necesita una API.")
+    question = st.text_input("¿Qué quieres aprender?", placeholder="Ej. ¿Qué significa ahorrar?")
+    if st.button("Ver explicación", key="ask_finania"):
+        q = question.lower().strip()
+        answers = [
+            (["ahorrar", "ahorro"], "Ahorrar significa guardar una parte del dinero para utilizarla después. Puedes elegir una meta y avanzar poco a poco."),
+            (["cambio", "vuelto"], "El cambio es el dinero que recibes cuando entregas más de lo que cuesta un producto. Resta: dinero entregado menos precio."),
+            (["presupuesto", "organizar"], "Un presupuesto es un plan para organizar el dinero que recibes y decidir cómo utilizarlo."),
+            (["necesidad", "deseo"], "Una necesidad es algo importante para vivir o estar bien, como alimentos o agua. Un deseo es algo que te gustaría tener, pero puede esperar."),
+            (["precio", "comparar"], "Para comparar precios, observa cuánto cuesta cada opción y qué cantidad o características ofrece.")
+        ]
+        reply = next((text for words, text in answers if any(word in q for word in words)), None)
+        if reply:
+            st.success(reply)
+        elif q:
+            st.info("Puedo explicar: ahorro, cambio, presupuesto, necesidades, deseos y comparación de precios.")
+        else:
+            st.warning("Escribe una pregunta o una palabra sobre el tema.")
+    st.caption("Este asistente básico no es un chatbot generativo y no envía preguntas a internet.")
+
+elif section == "⚙️ Mi experiencia":
+    st.header("⚙️ Mi experiencia")
+    st.write("Adapta la aplicación a tus preferencias.")
+    st.session_state.nombre = st.text_input("Nombre o apodo (opcional)", value=st.session_state.nombre)
+    st.session_state.tamano_letra = st.select_slider(
+        "Tamaño de letra", options=["Pequeña", "Mediana", "Grande", "Muy grande"],
+        value=st.session_state.tamano_letra
+    )
+    st.session_state.alto_contraste = st.toggle("Activar alto contraste", value=st.session_state.alto_contraste)
+    st.session_state.mostrar_pistas = st.toggle(
+        "Mostrar instrucciones paso a paso", value=st.session_state.mostrar_pistas
+    )
+    st.success("Tus preferencias se aplican durante esta sesión.")
+    st.caption("Cada persona tiene preferencias diferentes. Puedes cambiar los ajustes cuando quieras.")
 
 st.divider()
-st.markdown("<div style='text-align:center;color:#77718b;font-size:.9rem'>💜 FinanIA Inclusivo · Aprende a tu ritmo · Prototipo educativo</div>", unsafe_allow_html=True)
+st.caption(
+    "FinanIA Inclusivo · Herramienta educativa. No ofrece asesoría financiera, "
+    "no realiza pagos y no diagnostica. Utiliza datos ficticios o de práctica."
+)
