@@ -1,5 +1,3 @@
-import re
-import json
 import random
 import streamlit as st
 import streamlit.components.v1 as components
@@ -14,14 +12,14 @@ st.set_page_config(
 )
 
 SECCIONES = [
-    ("🏠 Inicio", "🏠", "Inicio", "Inicio. Pantalla principal con tu resumen de dinero y ahorro."),
-    ("🪙 Conozco el dinero", "🪙", "Dinero", "Conozco el dinero. Reconoce monedas, billetes y practica sumas."),
-    ("🛍️ Practico compras", "🛍️", "Compras", "Practico compras. Elige productos y calcula tu cambio."),
-    ("📊 Organizo mi dinero", "📊", "Organizar", "Organizo mi dinero. Registra tus ingresos y gastos."),
-    ("🌱 Mi ahorro", "🌱", "Ahorro", "Mi ahorro. Define una meta y mira cuánto llevas ahorrado."),
-    ("🎮 Retos y juegos", "🎮", "Retos", "Retos y juegos. Responde preguntas de fácil a difícil y gana estrellas."),
-    ("💬 Ayuda KikiPay", "💬", "Ayuda", "Ayuda KikiPay. Consulta explicaciones sencillas sobre el dinero."),
-    ("⚙️ Mi experiencia", "⚙️", "Ajustes", "Ajustes. Cambia el tamaño de letra, los colores y el sonido."),
+    ("🏠 Inicio", "🏠", "Inicio"),
+    ("🪙 Conozco el dinero", "🪙", "Dinero"),
+    ("🛍️ Practico compras", "🛍️", "Compras"),
+    ("📊 Organizo mi dinero", "📊", "Organizar"),
+    ("🌱 Mi ahorro", "🌱", "Ahorro"),
+    ("🎮 Retos y juegos", "🎮", "Retos"),
+    ("💬 Ayuda KikiPay", "💬", "Ayuda"),
+    ("⚙️ Mi experiencia", "⚙️", "Ajustes"),
 ]
 
 DEFAULTS = {
@@ -33,7 +31,6 @@ DEFAULTS = {
     "tamano_letra": "Mediana",
     "alto_contraste": False,
     "mostrar_pistas": True,
-    "mostrar_voz": True,
     "modo_demo": False,
     "reto_i": 0,
     "reto_intentos": 0,
@@ -111,180 +108,30 @@ div.stButton > button p {{
     unsafe_allow_html=True,
 )
 
-SPEAK_JS = """
-(function(){
-  const synth = window.speechSynthesis;
-  let audioFallback = null;
-  function norm(v){ return (v.lang || '').replace('_', '-').toLowerCase(); }
-  function pickVoice(){
-    if (!synth) return null;
-    const vs = synth.getVoices();
-    const prefer = ['dalia','sabina','paulina','monica','helena','google','mujer','female'];
-    const byName = list => {
-      for (const n of prefer){
-        const f = list.find(v => v.name.toLowerCase().includes(n));
-        if (f) return f;
-      }
-      return list[0];
-    };
-    let l = vs.filter(v => norm(v) === 'es-mx'); if (l.length) return byName(l);
-    l = vs.filter(v => norm(v) === 'es-us');     if (l.length) return byName(l);
-    l = vs.filter(v => norm(v).startsWith('es'));if (l.length) return byName(l);
-    return null;
-  }
-  if (synth){
-    synth.getVoices();
-    synth.onvoiceschanged = function(){ synth.getVoices(); };
-  }
-  function stopAll(){
-    if (synth){ try { synth.cancel(); } catch(e){} }
-    if (audioFallback){
-      try { audioFallback.pause(); audioFallback.currentTime = 0; } catch(e){}
-      audioFallback = null;
-    }
-    document.querySelectorAll('.b.on').forEach(b => b.classList.remove('on'));
-  }
-  function playFallbackTTS(text, btn){
-    const chunks = text.match(/.{1,180}(\\s|$)/g) || [text];
-    let idx = 0;
-    btn.classList.add('on');
-    function next(){
-      if (idx >= chunks.length){ btn.classList.remove('on'); return; }
-      const q = encodeURIComponent(chunks[idx].trim());
-      idx++;
-      audioFallback = new Audio('https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl=es-MX&q=' + q);
-      audioFallback.onended = next;
-      audioFallback.onerror = function(){ btn.classList.remove('on'); };
-      audioFallback.play().catch(function(){ btn.classList.remove('on'); });
-    }
-    next();
-  }
-  window.hablar = function(text, btn){
-    const yaActivo = btn.classList.contains('on');
-    stopAll();
-    if (yaActivo) return;
-    if (synth){
-      try {
-        if (synth.paused) synth.resume();
-        const u = new SpeechSynthesisUtterance(text);
-        const v = pickVoice();
-        if (v){ u.voice = v; u.lang = v.lang; } else { u.lang = 'es-MX'; }
-        u.rate = 0.92; u.pitch = 1.05; u.volume = 1;
-        window.__kikiUtterance = u;
-        let inicioConfirmado = false;
-        u.onstart = function(){ inicioConfirmado = true; };
-        u.onend = function(){ btn.classList.remove('on'); window.__kikiUtterance = null; };
-        u.onerror = function(){ window.__kikiUtterance = null; playFallbackTTS(text, btn); };
-        btn.classList.add('on');
-        synth.speak(u);
-        setTimeout(function(){
-          if (!inicioConfirmado && !synth.speaking){
-            try { synth.cancel(); } catch(e){}
-            playFallbackTTS(text, btn);
-          }
-        }, 450);
-        return;
-      } catch(e){}
-    }
-    playFallbackTTS(text, btn);
-  };
-})();
-"""
-
-BTN_CSS = """
-body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100%;}
-.b{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;cursor:pointer;
-   color:#fff;background:linear-gradient(135deg,#FF4D8D,#7C4DFF);border-radius:999px;
-   min-height:46px;min-width:46px;padding:0 15px;font-size:22px;
-   box-shadow:0 3px 8px rgba(0,0,0,.25);transition:transform .15s;}
-.b:hover{transform:scale(1.06);}
-.b span{font-size:16px;font-weight:700;}
-.b.on{background:linear-gradient(135deg,#00B894,#00C9FF);animation:pulso 1s infinite;}
-@keyframes pulso{0%{box-shadow:0 0 0 0 rgba(0,184,148,.7);}100%{box-shadow:0 0 0 14px rgba(0,184,148,0);}}
-"""
-
-
-def clean_for_speech(text):
-    t = str(text)
-    def _money(m):
-        num = m.group(1).replace(",", "")
-        if num.endswith(".00"):
-            num = num[:-3]
-        return f"{num} pesos"
-    t = re.sub(r"\$\s?([\d,]+(?:\.\d+)?)(\s?MXN)?", _money, t)
-    t = re.sub(r"[\U0001F000-\U0001FFFF\u2600-\u27BF\uFE0F\u200d]", "", t)
-    t = t.replace("**", "").replace("*", "").replace("`", "")
-    t = t.replace("%", " por ciento").replace(" + ", " más ")
-    t = t.replace(" - ", " menos ").replace(" = ", " es igual a ")
-    return re.sub(r"\s+", " ", t).strip()
-
-
-def speak_button(text, label=None, compact=False):
-    if not st.session_state.mostrar_voz:
-        return
-    speech = json.dumps(clean_for_speech(text), ensure_ascii=False).replace("</", "<\\/")
-    inner = f"🔊<span>{label}</span>" if label else "🔊"
-    extra_css = ".b{min-height:42px;min-width:42px;padding:0;font-size:20px;}" if compact else ""
-    html = (
-        f"<style>{BTN_CSS}{extra_css}</style>"
-        f'<button class="b" aria-label="Escuchar" title="Escuchar" '
-        f'onclick="hablar({speech}, this)">{inner}</button>'
-        f"<script>{SPEAK_JS}</script>"
-    )
-    components.html(html, height=58 if compact else 56)
-
 
 def md_safe(text):
     return str(text).replace("$", "\\$")
 
 
-def header(text, speech=None):
-    if st.session_state.mostrar_voz:
-        c1, c2 = st.columns([1, 10], vertical_alignment="center")
-        with c1:
-            speak_button(speech or text)
-        with c2:
-            st.header(md_safe(text))
-    else:
-        st.header(md_safe(text))
+def header(text):
+    st.header(md_safe(text))
 
 
-def subheader(text, speech=None):
-    if st.session_state.mostrar_voz:
-        c1, c2 = st.columns([1, 10], vertical_alignment="center")
-        with c1:
-            speak_button(speech or text)
-        with c2:
-            st.subheader(md_safe(text))
-    else:
-        st.subheader(md_safe(text))
+def subheader(text):
+    st.subheader(md_safe(text))
 
 
-def msg(kind, text, speech=None):
-    if st.session_state.mostrar_voz:
-        c1, c2 = st.columns([1, 10], vertical_alignment="center")
-        with c1:
-            speak_button(speech or text)
-        with c2:
-            getattr(st, kind)(md_safe(text))
-    else:
-        getattr(st, kind)(md_safe(text))
+def msg(kind, text):
+    getattr(st, kind)(md_safe(text))
 
 
-def prompt(text, speech=None):
-    if st.session_state.mostrar_voz:
-        c1, c2 = st.columns([1, 10], vertical_alignment="center")
-        with c1:
-            speak_button(speech or text)
-        with c2:
-            st.markdown("**" + md_safe(text) + "**")
-    else:
-        st.markdown("**" + md_safe(text) + "**")
+def prompt(text):
+    st.markdown("**" + md_safe(text) + "**")
 
 
 def hint(message):
     if st.session_state.mostrar_pistas:
-        msg("info", "**Paso a paso:** " + message, "Paso a paso. " + message)
+        msg("info", "**Paso a paso:** " + message)
 
 
 def money(value):
@@ -440,49 +287,32 @@ saludo_personal = f"¡Hola, {st.session_state.nombre.strip()}! " if st.session_s
 st.markdown(
     f'<div class="kikipay-hero"><h1>🌈 KikiPay Inclusivo</h1>'
     f"<h3>{saludo_personal}Aprender sobre el dinero, paso a paso y a tu propio ritmo.</h3>"
-    f"<p>Toca cualquier icono grande para entrar o toca su bocina 🔊 para escucharlo.</p></div>",
+    f"<p>Toca cualquier icono grande para entrar directo a esa actividad. No hay prisa.</p></div>",
     unsafe_allow_html=True,
-)
-speak_button(
-    f"{saludo_personal}Bienvenido a KikiPay Inclusivo. Aprende sobre el dinero, paso a paso y a tu propio ritmo. "
-    "Toca cualquier icono para entrar o toca su bocina para escucharlo.",
-    label="Escuchar bienvenida",
 )
 
 # ---------------------------------------------------------------
-# Único menú superior de iconos grandes con bocina en cada opción
+# Menú superior de iconos grandes
 # ---------------------------------------------------------------
 for fila in (SECCIONES[:4], SECCIONES[4:]):
     nav_cols = st.columns(4)
-    for col_idx, (sec_full, icon, short_label, desc_voz) in enumerate(fila):
+    for col_idx, (sec_full, icon, short_label) in enumerate(fila):
         with nav_cols[col_idx]:
             es_actual = st.session_state.seccion_actual == sec_full
             etiqueta = f"{icon}\n{short_label} ✓" if es_actual else f"{icon}\n{short_label}"
-            if st.session_state.mostrar_voz:
-                b_col, s_col = st.columns([3.2, 1], vertical_alignment="center")
-                with b_col:
-                    st.button(etiqueta, key=f"nav_top_{sec_full}", use_container_width=True, on_click=ir_a, args=(sec_full,))
-                with s_col:
-                    speak_button(desc_voz, compact=True)
-            else:
-                st.button(etiqueta, key=f"nav_top_{sec_full}", use_container_width=True, on_click=ir_a, args=(sec_full,))
+            st.button(etiqueta, key=f"nav_top_{sec_full}", use_container_width=True, on_click=ir_a, args=(sec_full,))
 
 st.divider()
 section = st.session_state.seccion_actual
 
 if section == "🏠 Inicio":
-    header("¡Bienvenido/a!", "Bienvenido. Elige cualquiera de los iconos de arriba para comenzar a practicar.")
+    header("¡Bienvenido/a!")
     st.write("Toca cualquier icono de arriba para abrir una actividad. Puedes volver aquí cuando quieras.")
     inc, exp, balance = totals()
     c1, c2, c3 = st.columns(3)
     c1.metric("💰 Saldo de práctica", money(balance))
     c2.metric("🌱 Ahorro registrado", money(st.session_state.ahorro_actual))
     c3.metric("🎯 Meta de ahorro", money(st.session_state.meta_ahorro))
-    speak_button(
-        f"Tu saldo de práctica es {money(balance)}. Tu ahorro registrado es {money(st.session_state.ahorro_actual)}. "
-        f"Tu meta de ahorro es {money(st.session_state.meta_ahorro)}.",
-        label="Escuchar mis datos",
-    )
     st.write("")
     msg("success", "Puedes repetir las actividades todas las veces que quieras. No hay prisa.")
 
@@ -492,7 +322,7 @@ elif section == "🪙 Conozco el dinero":
     examples = {"Una moneda de $5": 5, "Dos monedas de $10": 20, "Un billete de $20": 20, "Un billete de $50": 50, "Cinco monedas de $10": 50}
     prompt("Observa esta representación:")
     item = st.selectbox("Representación", list(examples.keys()), label_visibility="collapsed")
-    subheader("💵 " + item, item)
+    subheader("💵 " + item)
     prompt("¿Cuánto dinero representa?")
     answer = st.radio("Cantidad", [5, 10, 20, 30, 50, 100], horizontal=True, key="money_answer", label_visibility="collapsed")
     if st.button("Comprobar cantidad", key="check_money"):
@@ -501,13 +331,13 @@ elif section == "🪙 Conozco el dinero":
         else:
             msg("warning", "Vuelve a mirar la representación e inténtalo otra vez.")
     st.divider()
-    subheader("➕ Practica una suma", "Practica una suma. Elige dos cantidades y escribe el total.")
+    subheader("➕ Practica una suma")
     a, b = st.columns(2)
     with a:
         first = st.selectbox("Primera cantidad", [1, 2, 5, 10, 20], key="sum_first")
     with b:
         second = st.selectbox("Segunda cantidad", [1, 2, 5, 10, 20], key="sum_second")
-    prompt(f"¿Cuánto es {first} más {second}?", f"¿Cuánto es {first} más {second}? Escribe el total.")
+    prompt(f"¿Cuánto es {first} más {second}?")
     result = st.number_input("Escribe el total", min_value=0, max_value=100, step=1, key="sum_result")
     if st.button("Revisar suma", key="check_sum"):
         if result == first + second:
@@ -523,7 +353,6 @@ elif section == "🛍️ Practico compras":
     product = st.selectbox("Producto", list(products.keys()), label_visibility="collapsed")
     price = products[product]
     st.metric("Precio", money(price))
-    speak_button(f"{product} cuesta {money(price)}.", label="Escuchar precio")
     prompt("¿Cuánto dinero entregas?")
     paid = st.selectbox("Dinero entregado", [10, 20, 50, 100, 200], index=2, label_visibility="collapsed")
     if st.button("Calcular cambio", key="calculate_change"):
@@ -553,7 +382,6 @@ elif section == "📊 Organizo mi dinero":
     a.metric("Ingresos", money(inc))
     b.metric("Gastos", money(exp))
     c.metric("Diferencia", money(balance))
-    speak_button(f"Tus ingresos son {money(inc)}. Tus gastos son {money(exp)}. La diferencia es {money(balance)}.", label="Escuchar mis totales")
     if st.session_state.movimientos:
         subheader("Mis movimientos")
         st.dataframe(pd.DataFrame(st.session_state.movimientos), use_container_width=True, hide_index=True)
@@ -574,7 +402,7 @@ elif section == "🌱 Mi ahorro":
     st.session_state.ahorro_actual = saved
     progress = min(saved / goal, 1.0)
     st.progress(progress)
-    msg("info", f"Avance: **{progress * 100:.0f}%**", f"Llevas un avance de {progress * 100:.0f} por ciento.")
+    msg("info", f"Avance: **{progress * 100:.0f}%**")
     remaining = max(goal - saved, 0)
     if remaining == 0:
         msg("success", "¡Meta alcanzada! ¡Felicidades! 🎉")
@@ -582,8 +410,8 @@ elif section == "🌱 Mi ahorro":
         msg("info", f"Te faltan {money(remaining)} para llegar a tu meta.")
 
 elif section == "🎮 Retos y juegos":
-    header("🎮 Retos y juegos", "Retos y juegos. Empiezan muy fáciles y poco a poco suben de nivel. Tómate tu tiempo.")
-    hint("Lee la pregunta, toca el altavoz si quieres escucharla y elige una respuesta. Puedes intentarlo las veces que quieras.")
+    header("🎮 Retos y juegos")
+    hint("Lee la pregunta y elige una respuesta. Puedes intentarlo las veces que quieras.")
     total = len(RETOS)
     i = st.session_state.reto_i
     estrellas = sum(st.session_state.reto_estrellas.values())
@@ -597,10 +425,6 @@ elif section == "🎮 Retos y juegos":
         unsafe_allow_html=True,
     )
     reto_map(i, st.session_state.reto_estrellas)
-    if i < total:
-        speak_button(f"Vas en el reto {i + 1} de {total}, del nivel {nivel_actual}. Llevas {estrellas} estrellas y {st.session_state.reto_puntos} puntos.", label="Escuchar dónde voy")
-    else:
-        speak_button("Llegaste a la meta. ¡Terminaste todos los retos!", label="Escuchar")
     chips = ""
     for lvl, (icon, name, color, _bg) in NIVELES.items():
         idxs = [k for k, r in enumerate(RETOS) if r["nivel"] == lvl]
@@ -626,7 +450,6 @@ elif section == "🎮 Retos y juegos":
             f'<div style="font-size:1.15em;font-weight:600;color:#263238">{q_html}</div></div>',
             unsafe_allow_html=True,
         )
-        speak_button(f"{reto['q']} Las opciones son: {', '.join(reto['op'])}.", label="Escuchar la pregunta")
         listo = st.session_state.reto_feedback == "ok"
         cols = st.columns(len(reto["op"]))
         for j, opt in enumerate(reto["op"]):
@@ -635,10 +458,10 @@ elif section == "🎮 Retos y juegos":
         fb = st.session_state.reto_feedback
         if fb == "ok":
             n = st.session_state.reto_estrellas[i]
-            msg("success", f"¡Respuesta correcta! 🌟 {reto['exp']} Ganaste {'⭐' * n}", f"¡Respuesta correcta! {reto['exp']}")
+            msg("success", f"¡Respuesta correcta! 🌟 {reto['exp']} Ganaste {'⭐' * n}")
             st.button("Ver mis resultados 🏆" if i == total - 1 else "Siguiente reto ➡️", key="reto_siguiente", on_click=siguiente_reto, use_container_width=True)
         elif fb == "fail":
-            msg("warning", "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"], "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"])
+            msg("warning", "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"])
 
 elif section == "💬 Ayuda KikiPay":
     header("💬 Ayuda KikiPay")
@@ -663,15 +486,14 @@ elif section == "💬 Ayuda KikiPay":
     st.caption("Este asistente básico no es un chatbot generativo y no envía preguntas a internet.")
 
 elif section == "⚙️ Mi experiencia":
-    header("⚙️ Mi experiencia", "Mi experiencia. Adapta la aplicación a tus preferencias.")
+    header("⚙️ Mi experiencia")
     st.write("Adapta la aplicación a tus preferencias.")
     st.session_state.nombre = st.text_input("Nombre o apodo (opcional)", value=st.session_state.nombre)
     st.session_state.tamano_letra = st.select_slider("Tamaño de letra", options=["Pequeña", "Mediana", "Grande", "Muy grande"], value=st.session_state.tamano_letra)
     st.session_state.alto_contraste = st.toggle("Activar alto contraste", value=st.session_state.alto_contraste)
     st.session_state.mostrar_pistas = st.toggle("Mostrar instrucciones paso a paso", value=st.session_state.mostrar_pistas)
-    st.session_state.mostrar_voz = st.toggle("Mostrar botones de voz 🔊", value=st.session_state.mostrar_voz)
     st.divider()
-    subheader("Datos de demostración", "Datos de demostración para practicar con ejemplos.")
+    subheader("Datos de demostración")
     demo_choice = st.toggle("Cargar ejemplo de demostración", value=st.session_state.modo_demo)
     if demo_choice and not st.session_state.modo_demo:
         st.session_state.movimientos = [
@@ -688,7 +510,6 @@ elif section == "⚙️ Mi experiencia":
         st.session_state.meta_ahorro = 500.0
         st.session_state.modo_demo = False
         st.rerun()
-    speak_button("Hola, soy tu guía de KikiPay. Estoy aquí para acompañarte a tu ritmo.", label="Probar la voz")
     msg("success", "Tus preferencias se aplican durante esta sesión.")
 
 st.divider()
