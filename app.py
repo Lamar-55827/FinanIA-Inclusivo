@@ -1,3 +1,4 @@
+import re
 import json
 import random
 import streamlit as st
@@ -73,9 +74,9 @@ else:
     fg, card, border = "#263238", "#FFFFFF", "#CBB8FF"
     btn_bg, btn_fg = "linear-gradient(135deg,#7C4DFF,#00B8A9)", "#FFFFFF"
 
-st.markdown(
-    f"""
+st.markdown(f"""
 <style>
+/* Ocultar barra lateral */
 [data-testid="stSidebar"], [data-testid="collapsedControl"] {{
   display: none !important;
 }}
@@ -128,13 +129,12 @@ div.stButton > button p {{
   font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35);
 }}
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------
-# Voz directa con respaldo automático
+# Voz directa en cada botón (sin setTimeout ni bloqueo cross-origin)
+# con respaldo automático si el navegador no tiene voces locales.
 # ---------------------------------------------------------------
 SPEAK_JS = """
 (function(){
@@ -165,7 +165,7 @@ SPEAK_JS = """
     synth.onvoiceschanged = function(){ synth.getVoices(); };
   }
 
-  function stopAll(){
+  function stopAll(btn){
     if (synth){
       try { synth.cancel(); } catch(e){}
     }
@@ -197,7 +197,7 @@ SPEAK_JS = """
 
   window.hablar = function(text, btn){
     const yaActivo = btn.classList.contains('on');
-    stopAll();
+    stopAll(btn);
     if (yaActivo) return;
 
     if (synth){
@@ -222,6 +222,7 @@ SPEAK_JS = """
         btn.classList.add('on');
         synth.speak(u);
 
+        // Si en 450ms el navegador no arrancó la voz local, activar respaldo de audio
         setTimeout(function(){
           if (!inicioConfirmado && !synth.speaking){
             try { synth.cancel(); } catch(e){}
@@ -250,6 +251,7 @@ body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;}
 
 
 def clean_for_speech(text):
+    """Convierte texto con formato a algo que suene natural al leerlo."""
     t = str(text)
 
     def _money(m):
@@ -268,6 +270,7 @@ def clean_for_speech(text):
 
 
 def speak_button(text, label=None):
+    """Botón de altavoz. Al tocarlo lee el texto en español."""
     if not st.session_state.mostrar_voz:
         return
     speech = json.dumps(clean_for_speech(text), ensure_ascii=False).replace("</", "<\\/")
@@ -335,6 +338,7 @@ def hint(message):
 
 
 def interactive_module_card(icon, title, desc, accent, bg, target_section, btn_key):
+    """Tarjeta visual con bocina independiente Y botón funcional de Streamlit para abrir el módulo."""
     if HC:
         bg, text_color = "#202D38", "#FFFFFF"
         accent = "#FFD600"
@@ -342,23 +346,27 @@ def interactive_module_card(icon, title, desc, accent, bg, target_section, btn_k
         text_color = "#263238"
 
     speech = json.dumps(clean_for_speech(f"{title}. {desc}"), ensure_ascii=False)
-    html = (
-        f"<style>{BTN_CSS}"
-        f".c{{background:{bg};border:4px solid {accent};border-radius:20px 20px 8px 8px;"
-        f"padding:14px 16px;height:165px;box-sizing:border-box;position:relative;"
-        f"box-shadow:0 4px 12px rgba(0,0,0,.10);}}"
-        f".ic{{font-size:46px;line-height:1;}}"
-        f"h4{{margin:8px 0 4px;color:{text_color};font-size:{font_px + 2}px;}}"
-        f"p{{margin:0;color:{text_color};font-size:{font_px - 1}px;}}"
-        f".sp{{position:absolute;top:10px;right:10px;}}</style>"
-        f'<div class="c">'
-        f'<div class="sp"><button class="b" aria-label="Escuchar" onclick=\'hablar({speech}, this)\'>🔊</button></div>'
-        f'<div class="ic">{icon}</div>'
-        f"<h4>{title}</h4>"
-        f"<p>{desc}</p>"
-        f"</div>"
-        f"<script>{SPEAK_JS}</script>"
-    )
+    html = f"""
+<style>
+{BTN_CSS}
+.c{{
+  background:{bg}; border:4px solid {accent}; border-radius:20px 20px 8px 8px;
+  padding:14px 16px; height:165px; box-sizing:border-box; position:relative;
+  box-shadow:0 4px 12px rgba(0,0,0,.10);
+}}
+.ic{{font-size:46px;line-height:1;}}
+h4{{margin:8px 0 4px;color:{text_color};font-size:{font_px + 2}px;}}
+p{{margin:0;color:{text_color};font-size:{font_px - 1}px;}}
+.sp{{position:absolute;top:10px;right:10px;}}
+</style>
+<div class="c">
+  <div class="sp"><button class="b" aria-label="Escuchar" onclick='hablar({speech}, this)'>🔊</button></div>
+  <div class="ic">{icon}</div>
+  <h4>{title}</h4>
+  <p>{desc}</p>
+</div>
+<script>{SPEAK_JS}</script>
+"""
     components.html(html, height=175)
     st.button(
         f"Abrir {icon} {title}",
@@ -495,20 +503,14 @@ def reto_map(i_actual, estrellas):
     colors = ["#FF4D8D", "#7C4DFF", "#00B894", "#FFB300", "#29B6F6", "#FF7043"]
     for _ in range(45):
         sx, sy = rnd.randint(30, 970), rnd.randint(30, 630)
-        sprinkles += (
-            f'<rect x="{sx}" y="{sy}" width="14" height="6" rx="3" fill="{rnd.choice(colors)}" '
-            f'opacity=".55" transform="rotate({rnd.randint(0, 180)} {sx} {sy})"/>'
-        )
+        sprinkles += (f'<rect x="{sx}" y="{sy}" width="14" height="6" rx="3" fill="{rnd.choice(colors)}" '
+                      f'opacity=".55" transform="rotate({rnd.randint(0, 180)} {sx} {sy})"/>')
 
-    deco = [
-        ("🍭", 55, 545, 54), ("🍬", 500, 520, 46), ("🍩", 260, 380, 50), ("🍬", 740, 380, 46),
-        ("🍭", 940, 380, 54), ("🧁", 500, 245, 50), ("🍪", 250, 245, 44), ("🍓", 750, 245, 44),
-        ("🍒", 640, 75, 48), ("🍩", 780, 85, 48), ("🏰", 930, 100, 60), ("🍭", 60, 330, 50),
-    ]
-    deco_svg = "".join(
-        f'<text x="{x}" y="{y}" font-size="{s}" text-anchor="middle" opacity=".9">{e}</text>'
-        for e, x, y, s in deco
-    )
+    deco = [("🍭", 55, 545, 54), ("🍬", 500, 520, 46), ("🍩", 260, 380, 50), ("🍬", 740, 380, 46),
+            ("🍭", 940, 380, 54), ("🧁", 500, 245, 50), ("🍪", 250, 245, 44), ("🍓", 750, 245, 44),
+            ("🍒", 640, 75, 48), ("🍩", 780, 85, 48), ("🏰", 930, 100, 60), ("🍭", 60, 330, 50)]
+    deco_svg = "".join(f'<text x="{x}" y="{y}" font-size="{s}" text-anchor="middle" opacity=".9">{e}</text>'
+                       for e, x, y, s in deco)
 
     paths = ""
     for k in range(n):
@@ -517,10 +519,8 @@ def reto_map(i_actual, estrellas):
         d = seg(a, b)
         hecho = k < i_actual
         stripe = "#2ECC71" if hecho else "#F48FB1"
-        paths += (
-            f'<path d="{d}" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>'
-            f'<path d="{d}" fill="none" stroke="{stripe}" stroke-width="30" stroke-dasharray="16 16"/>'
-        )
+        paths += (f'<path d="{d}" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>'
+                  f'<path d="{d}" fill="none" stroke="{stripe}" stroke-width="30" stroke-dasharray="16 16"/>')
 
     nodes = ""
     for k, (x, y) in enumerate(pos):
@@ -532,59 +532,49 @@ def reto_map(i_actual, estrellas):
             stars = "".join(
                 f'<text x="{x + dx}" y="{y + 72}" font-size="28" text-anchor="middle" '
                 f'fill="{"#FFC107" if idx < got else "#E0E0E0"}" stroke="#fff" stroke-width="1">★</text>'
-                for idx, dx in enumerate((-26, 0, 26))
-            )
-            nodes += (
-                f'<g><title>Reto {k + 1}: {nombre}</title>'
-                f'<circle cx="{x}" cy="{y}" r="42" fill="{color}" stroke="#FFD54F" stroke-width="8"/>'
-                f'<text x="{x}" y="{y}" dy=".35em" font-size="34" font-weight="800" text-anchor="middle" '
-                f'fill="#fff" stroke="rgba(0,0,0,.35)" stroke-width="4" paint-order="stroke">{k + 1}</text>'
-                f'<text x="{x}" y="{y - 48}" font-size="30" text-anchor="middle">👑</text>{stars}</g>'
-            )
+                for idx, dx in enumerate((-26, 0, 26)))
+            nodes += (f'<g><title>Reto {k + 1}: {nombre}</title>'
+                      f'<circle cx="{x}" cy="{y}" r="42" fill="{color}" stroke="#FFD54F" stroke-width="8"/>'
+                      f'<text x="{x}" y="{y}" dy=".35em" font-size="34" font-weight="800" text-anchor="middle" '
+                      f'fill="#fff" stroke="rgba(0,0,0,.35)" stroke-width="4" paint-order="stroke">{k + 1}</text>'
+                      f'<text x="{x}" y="{y - 48}" font-size="30" text-anchor="middle">👑</text>{stars}</g>')
         elif k == i_actual:
-            nodes += (
-                f'<g><title>Reto {k + 1}: estás aquí</title>'
-                f'<circle cx="{x}" cy="{y}" r="46" fill="none" stroke="#FFD600" stroke-width="6">'
-                f'<animate attributeName="r" values="46;66;46" dur="1.4s" repeatCount="indefinite"/>'
-                f'<animate attributeName="opacity" values="1;0;1" dur="1.4s" repeatCount="indefinite"/></circle>'
-                f'<circle cx="{x}" cy="{y}" r="46" fill="{color}" stroke="#FFFFFF" stroke-width="9"/>'
-                f'<text x="{x}" y="{y}" dy=".35em" font-size="40" font-weight="800" text-anchor="middle" '
-                f'fill="#fff" stroke="rgba(0,0,0,.35)" stroke-width="4" paint-order="stroke">{k + 1}</text>'
-                f'<g><animateTransform attributeName="transform" type="translate" '
-                f'values="0 0;0 -12;0 0" dur="0.9s" repeatCount="indefinite"/>'
-                f'<text x="{x}" y="{y - 58}" font-size="44" text-anchor="middle">🦄</text></g></g>'
-            )
+            nodes += (f'<g><title>Reto {k + 1}: estás aquí</title>'
+                      f'<circle cx="{x}" cy="{y}" r="46" fill="none" stroke="#FFD600" stroke-width="6">'
+                      f'<animate attributeName="r" values="46;66;46" dur="1.4s" repeatCount="indefinite"/>'
+                      f'<animate attributeName="opacity" values="1;0;1" dur="1.4s" repeatCount="indefinite"/></circle>'
+                      f'<circle cx="{x}" cy="{y}" r="46" fill="{color}" stroke="#FFFFFF" stroke-width="9"/>'
+                      f'<text x="{x}" y="{y}" dy=".35em" font-size="40" font-weight="800" text-anchor="middle" '
+                      f'fill="#fff" stroke="rgba(0,0,0,.35)" stroke-width="4" paint-order="stroke">{k + 1}</text>'
+                      f'<g><animateTransform attributeName="transform" type="translate" '
+                      f'values="0 0;0 -12;0 0" dur="0.9s" repeatCount="indefinite"/>'
+                      f'<text x="{x}" y="{y - 58}" font-size="44" text-anchor="middle">🦄</text></g></g>')
         else:
-            nodes += (
-                f'<g><title>Reto {k + 1}: todavía bloqueado</title>'
-                f'<circle cx="{x}" cy="{y}" r="40" fill="#B0BEC5" stroke="#FFFFFF" stroke-width="7"/>'
-                f'<text x="{x}" y="{y}" dy=".35em" font-size="32" font-weight="800" text-anchor="middle" '
-                f'fill="#ECEFF1" stroke="rgba(0,0,0,.25)" stroke-width="3" paint-order="stroke">{k + 1}</text>'
-                f'<text x="{x}" y="{y + 66}" font-size="22" text-anchor="middle">🔒</text></g>'
-            )
+            nodes += (f'<g><title>Reto {k + 1}: todavía bloqueado</title>'
+                      f'<circle cx="{x}" cy="{y}" r="40" fill="#B0BEC5" stroke="#FFFFFF" stroke-width="7"/>'
+                      f'<text x="{x}" y="{y}" dy=".35em" font-size="32" font-weight="800" text-anchor="middle" '
+                      f'fill="#ECEFF1" stroke="rgba(0,0,0,.25)" stroke-width="3" paint-order="stroke">{k + 1}</text>'
+                      f'<text x="{x}" y="{y + 66}" font-size="22" text-anchor="middle">🔒</text></g>')
 
     fin = i_actual >= n
-    glow = (
-        '<circle cx="150" cy="55" r="58" fill="#FFF176" opacity=".8">'
-        '<animate attributeName="r" values="50;70;50" dur="1.2s" repeatCount="indefinite"/></circle>'
-        if fin
-        else ""
-    )
-    html = (
-        "<style>body{margin:0;background:transparent}"
-        "svg{width:100%;height:auto;display:block;max-width:1100px;margin:0 auto;"
-        "font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji','Segoe UI',Arial,sans-serif}</style>"
-        '<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mapa de retos">'
-        '<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0" stop-color="#FFF59D"/><stop offset=".3" stop-color="#C8F2A5"/>'
-        '<stop offset=".65" stop-color="#FFC4E3"/><stop offset="1" stop-color="#D5C2FF"/></linearGradient></defs>'
-        '<rect x="5" y="5" width="990" height="650" rx="26" fill="url(#bg)" stroke="#D81B60" stroke-width="10"/>'
-        f"{sprinkles}{deco_svg}{paths}{glow}"
-        '<text x="150" y="75" font-size="76" text-anchor="middle">👑</text>'
-        '<text x="330" y="90" font-size="58" font-weight="900" font-style="italic" fill="#E53935" stroke="#FFFFFF" '
-        'stroke-width="8" paint-order="stroke" text-anchor="start">¡LA META!</text>'
-        f"{nodes}</svg>"
-    )
+    glow = ('<circle cx="150" cy="55" r="58" fill="#FFF176" opacity=".8">'
+            '<animate attributeName="r" values="50;70;50" dur="1.2s" repeatCount="indefinite"/></circle>') if fin else ""
+    html = f"""
+<style>body{{margin:0;background:transparent}}
+svg{{width:100%;height:auto;display:block;max-width:1100px;margin:0 auto;
+font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji','Segoe UI',Arial,sans-serif}}</style>
+<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mapa de retos">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#FFF59D"/><stop offset=".3" stop-color="#C8F2A5"/>
+<stop offset=".65" stop-color="#FFC4E3"/><stop offset="1" stop-color="#D5C2FF"/></linearGradient></defs>
+<rect x="5" y="5" width="990" height="650" rx="26" fill="url(#bg)" stroke="#D81B60" stroke-width="10"/>
+{sprinkles}{deco_svg}{paths}
+{glow}<text x="150" y="75" font-size="76" text-anchor="middle">👑</text>
+<text x="330" y="90" font-size="58" font-weight="900" font-style="italic" fill="#E53935" stroke="#FFFFFF"
+stroke-width="8" paint-order="stroke" text-anchor="start">¡LA META!</text>
+{nodes}
+</svg>
+"""
     components.html(html, height=740)
 
 
@@ -605,16 +595,13 @@ saludo_personal = (
     if st.session_state.nombre.strip()
     else ""
 )
-st.markdown(
-    f"""
+st.markdown(f"""
 <div class="kikipay-hero">
 <h1>🌈 KikiPay Inclusivo</h1>
 <h3>{saludo_personal}Aprender sobre el dinero, paso a paso y a tu propio ritmo.</h3>
 <p>Toca cualquier icono grande para entrar directo a esa actividad. No hay prisa.</p>
 </div>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 speak_button(
     f"{saludo_personal}Bienvenido a KikiPay Inclusivo. Aprende sobre el dinero, paso a paso y a tu propio ritmo. "
@@ -624,6 +611,7 @@ speak_button(
 
 # ---------------------------------------------------------------
 # Barra superior de navegación en 2 filas de 4 botones grandes
+# para que ningún nombre ni icono se corte con "..."
 # ---------------------------------------------------------------
 for fila in (SECCIONES[:4], SECCIONES[4:]):
     nav_cols = st.columns(4)
@@ -814,14 +802,13 @@ elif section == "🎮 Retos y juegos":
     estrellas = sum(st.session_state.reto_estrellas.values())
     nivel_actual = RETOS[min(i, total - 1)]["nivel"]
 
-    st.markdown(
-        f'<div class="score-row">'
-        f'<div class="score" style="background:#FF6B9D">⭐ Estrellas<br><span style="font-size:1.4em">{estrellas} / {total * 3}</span></div>'
-        f'<div class="score" style="background:#7C4DFF">🏅 Puntos<br><span style="font-size:1.4em">{st.session_state.reto_puntos}</span></div>'
-        f'<div class="score" style="background:#00B894">🎯 Reto<br><span style="font-size:1.4em">{min(i + 1, total)} de {total}</span></div>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""
+<div class="score-row">
+  <div class="score" style="background:#FF6B9D">⭐ Estrellas<br><span style="font-size:1.4em">{estrellas} / {total * 3}</span></div>
+  <div class="score" style="background:#7C4DFF">🏅 Puntos<br><span style="font-size:1.4em">{st.session_state.reto_puntos}</span></div>
+  <div class="score" style="background:#00B894">🎯 Reto<br><span style="font-size:1.4em">{min(i + 1, total)} de {total}</span></div>
+</div>
+""", unsafe_allow_html=True)
 
     reto_map(i, st.session_state.reto_estrellas)
     if i < total:
@@ -866,13 +853,12 @@ elif section == "🎮 Retos y juegos":
         icon, name, color, bg = NIVELES[reto["nivel"]]
         q_html = reto["q"].replace("$", "&#36;")
         txt = "#263238"
-        st.markdown(
-            f'<div class="reto-card" style="background:{bg};border-color:{color};color:{txt}">'
-            f'<div style="font-weight:700;color:{color};margin-bottom:.3rem">{icon} Nivel {reto["nivel"]} · {name}</div>'
-            f'<div style="font-size:1.15em;font-weight:600;color:{txt}">{q_html}</div>'
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"""
+<div class="reto-card" style="background:{bg};border-color:{color};color:{txt}">
+  <div style="font-weight:700;color:{color};margin-bottom:.3rem">{icon} Nivel {reto['nivel']} · {name}</div>
+  <div style="font-size:1.15em;font-weight:600;color:{txt}">{q_html}</div>
+</div>
+""", unsafe_allow_html=True)
         opciones_voz = ", ".join(reto["op"])
         speak_button(f"{reto['q']} Las opciones son: {opciones_voz}.", label="Escuchar la pregunta")
 
@@ -971,3 +957,4 @@ st.divider()
 st.caption(
     "KikiPay Inclusivo · Herramienta educativa. No ofrece asesoría financiera, "
     "no realiza pagos y no diagnostica. Utiliza datos ficticios o de práctica."
+)
