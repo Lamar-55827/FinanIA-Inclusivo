@@ -1,4 +1,3 @@
-import re
 import json
 import random
 import streamlit as st
@@ -631,4 +630,344 @@ for fila in (SECCIONES[:4], SECCIONES[4:]):
     for col_idx, (sec_full, icon, short_label) in enumerate(fila):
         with nav_cols[col_idx]:
             es_actual = st.session_state.seccion_actual == sec_full
-            etiqueta = f"{icon}\n{short_label} ✓" if es_
+            etiqueta = f"{icon}\n{short_label} ✓" if es_actual else f"{icon}\n{short_label}"
+            st.button(
+                etiqueta,
+                key=f"nav_top_{sec_full}",
+                use_container_width=True,
+                on_click=ir_a,
+                args=(sec_full,),
+            )
+
+st.divider()
+
+section = st.session_state.seccion_actual
+
+# ---------------------------------------------------------------
+# Secciones
+# ---------------------------------------------------------------
+if section == "🏠 Inicio":
+    header("¡Bienvenido/a!", "Bienvenido. Toca la tarjeta o el icono de la actividad que quieras hacer.")
+    st.write("Toca cualquier tarjeta para comenzar. Puedes volver al inicio cuando quieras.")
+
+    inc, exp, balance = totals()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("💰 Saldo de práctica", money(balance))
+    c2.metric("🌱 Ahorro registrado", money(st.session_state.ahorro_actual))
+    c3.metric("🎯 Meta de ahorro", money(st.session_state.meta_ahorro))
+
+    speak_button(
+        f"Tu saldo de práctica es {money(balance)}. Tu ahorro registrado es {money(st.session_state.ahorro_actual)}. "
+        f"Tu meta de ahorro es {money(st.session_state.meta_ahorro)}.",
+        label="Escuchar mis datos",
+    )
+
+    subheader("Toca un icono para abrir la actividad")
+    cards = [
+        ("🪙", "Conocer el dinero", "Reconocer cantidades y practicar sumas.", "#FF6B9D", "#FFE3EE", "🪙 Conozco el dinero"),
+        ("🛍️", "Practicar compras", "Elegir productos y calcular el cambio.", "#FF9800", "#FFEFD6", "🛍️ Practico compras"),
+        ("📊", "Organizar mi dinero", "Registrar ingresos y gastos.", "#00B894", "#DDF8EF", "📊 Organizo mi dinero"),
+        ("🌱", "Mi ahorro", "Crear una meta y observar el progreso.", "#43A047", "#E3F6E4", "🌱 Mi ahorro"),
+        ("🎮", "Retos y juegos", "Resolver situaciones cotidianas, de fácil a difícil.", "#7C4DFF", "#EAE3FF", "🎮 Retos y juegos"),
+        ("💬", "Ayuda KikiPay", "Consultar explicaciones sencillas.", "#00ACC1", "#DDF5F9", "💬 Ayuda KikiPay"),
+    ]
+    cols = st.columns(3)
+    for idx, (icon, title, desc, accent, bg, target) in enumerate(cards):
+        with cols[idx % 3]:
+            interactive_module_card(icon, title, desc, accent, bg, target, f"card_open_{idx}")
+
+    st.write("")
+    msg("success", "Puedes repetir las actividades todas las veces que quieras.")
+
+elif section == "🪙 Conozco el dinero":
+    header("🪙 Conozco el dinero")
+    hint("Observa la tarjeta, elige la cantidad y presiona Comprobar.")
+    examples = {
+        "Una moneda de $5": 5,
+        "Dos monedas de $10": 20,
+        "Un billete de $20": 20,
+        "Un billete de $50": 50,
+        "Cinco monedas de $10": 50,
+    }
+    prompt("Observa esta representación:")
+    item = st.selectbox("Representación", list(examples.keys()), label_visibility="collapsed")
+    subheader("💵 " + item, item)
+    prompt("¿Cuánto dinero representa?")
+    answer = st.radio(
+        "Cantidad", [5, 10, 20, 30, 50, 100], horizontal=True,
+        key="money_answer", label_visibility="collapsed"
+    )
+    if st.button("Comprobar cantidad", key="check_money"):
+        if answer == examples[item]:
+            msg("success", "¡Correcto! Identificaste la cantidad. 🎉")
+        else:
+            msg("warning", "Vuelve a mirar la representación e inténtalo otra vez.")
+    st.divider()
+    subheader("➕ Practica una suma", "Practica una suma. Elige dos cantidades y escribe el total.")
+    a, b = st.columns(2)
+    with a:
+        first = st.selectbox("Primera cantidad", [1, 2, 5, 10, 20], key="sum_first")
+    with b:
+        second = st.selectbox("Segunda cantidad", [1, 2, 5, 10, 20], key="sum_second")
+    prompt(f"¿Cuánto es {first} más {second}?", f"¿Cuánto es {first} más {second}? Escribe el total.")
+    result = st.number_input("Escribe el total", min_value=0, max_value=100, step=1, key="sum_result")
+    if st.button("Revisar suma", key="check_sum"):
+        if result == first + second:
+            msg("success", f"¡Muy bien! {first} + {second} = {first + second}.")
+        else:
+            msg("info", f"Pista: empieza con {first} y agrega {second}.")
+
+elif section == "🛍️ Practico compras":
+    header("🛍️ Practico compras")
+    hint("Selecciona un producto, revisa el precio y elige cuánto dinero entregas.")
+    products = {
+        "🍎 Manzana": 12, "🥛 Leche": 24, "🍞 Pan": 18,
+        "📒 Cuaderno": 35, "🖍️ Colores": 42, "🧼 Jabón": 16,
+    }
+    prompt("¿Qué quieres comprar?")
+    product = st.selectbox("Producto", list(products.keys()), label_visibility="collapsed")
+    price = products[product]
+    st.metric("Precio", money(price))
+    speak_button(f"{product} cuesta {money(price)}.", label="Escuchar precio")
+    prompt("¿Cuánto dinero entregas?")
+    paid = st.selectbox("Dinero entregado", [10, 20, 50, 100, 200], index=2, label_visibility="collapsed")
+    if st.button("Calcular cambio", key="calculate_change"):
+        if paid < price:
+            msg("error", f"Te faltan {money(price - paid)}.")
+        else:
+            msg("success", f"Tu cambio sería {money(paid - price)}. ¡Buen trabajo!")
+    st.caption("Simulación educativa: no realiza compras ni pagos reales.")
+
+elif section == "📊 Organizo mi dinero":
+    header("📊 Organizo mi dinero")
+    hint("Completa los campos y presiona Guardar movimiento. Puedes usar datos ficticios.")
+    with st.form("movement_form", clear_on_submit=True):
+        kind = st.radio("Tipo de movimiento", ["Ingreso", "Gasto"], horizontal=True)
+        concept = st.text_input("Concepto", placeholder="Ej. dinero para transporte")
+        amount = st.number_input("Cantidad en pesos", min_value=0.0, step=1.0)
+        category = st.selectbox("Categoría", [
+            "Alimentación", "Transporte", "Educación", "Hogar",
+            "Diversión", "Salud", "Ahorro", "Otro",
+        ])
+        submitted = st.form_submit_button("Guardar movimiento")
+    if submitted:
+        if amount <= 0:
+            msg("error", "Escribe una cantidad mayor que cero.")
+        else:
+            add_movement(kind, concept.strip(), category, amount)
+            msg("success", "¡Movimiento guardado en esta sesión!")
+    inc, exp, balance = totals()
+    a, b, c = st.columns(3)
+    a.metric("Ingresos", money(inc))
+    b.metric("Gastos", money(exp))
+    c.metric("Diferencia", money(balance))
+    speak_button(
+        f"Tus ingresos son {money(inc)}. Tus gastos son {money(exp)}. "
+        f"La diferencia es {money(balance)}.",
+        label="Escuchar mis totales",
+    )
+    if st.session_state.movimientos:
+        subheader("Mis movimientos")
+        st.dataframe(pd.DataFrame(st.session_state.movimientos), use_container_width=True, hide_index=True)
+        if st.button("Borrar todos los movimientos", key="clear_movements"):
+            st.session_state.movimientos = []
+            st.rerun()
+    else:
+        msg("info", "Todavía no hay movimientos. Agrega uno de práctica para comenzar.")
+
+elif section == "🌱 Mi ahorro":
+    header("🌱 Mi ahorro")
+    hint("Define una meta y registra cuánto llevas ahorrado.")
+    prompt("Mi meta de ahorro (pesos)")
+    goal = st.number_input(
+        "Meta", min_value=1.0, value=float(st.session_state.meta_ahorro),
+        step=10.0, label_visibility="collapsed"
+    )
+    prompt("¿Cuánto llevo ahorrado? (pesos)")
+    saved = st.number_input(
+        "Ahorrado", min_value=0.0, value=float(st.session_state.ahorro_actual),
+        step=5.0, label_visibility="collapsed"
+    )
+    st.session_state.meta_ahorro = goal
+    st.session_state.ahorro_actual = saved
+    progress = min(saved / goal, 1.0)
+    st.progress(progress)
+    msg("info", f"Avance: **{progress * 100:.0f}%**", f"Llevas un avance de {progress * 100:.0f} por ciento.")
+    remaining = max(goal - saved, 0)
+    if remaining == 0:
+        msg("success", "¡Meta alcanzada! ¡Felicidades! 🎉")
+    else:
+        msg("info", f"Te faltan {money(remaining)} para llegar a tu meta.")
+
+elif section == "🎮 Retos y juegos":
+    header(
+        "🎮 Retos y juegos",
+        "Retos y juegos. Empiezan muy fáciles y poco a poco suben de nivel. Tómate tu tiempo.",
+    )
+    hint(
+        "Lee la pregunta, toca el altavoz si quieres escucharla y elige una respuesta. "
+        "Puedes intentarlo las veces que quieras."
+    )
+
+    total = len(RETOS)
+    i = st.session_state.reto_i
+    estrellas = sum(st.session_state.reto_estrellas.values())
+    nivel_actual = RETOS[min(i, total - 1)]["nivel"]
+
+    st.markdown(
+        f'<div class="score-row">'
+        f'<div class="score" style="background:#FF6B9D">⭐ Estrellas<br><span style="font-size:1.4em">{estrellas} / {total * 3}</span></div>'
+        f'<div class="score" style="background:#7C4DFF">🏅 Puntos<br><span style="font-size:1.4em">{st.session_state.reto_puntos}</span></div>'
+        f'<div class="score" style="background:#00B894">🎯 Reto<br><span style="font-size:1.4em">{min(i + 1, total)} de {total}</span></div>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    reto_map(i, st.session_state.reto_estrellas)
+    if i < total:
+        speak_button(
+            f"Vas en el reto {i + 1} de {total}, del nivel {nivel_actual}. "
+            f"Llevas {estrellas} estrellas y {st.session_state.reto_puntos} puntos.",
+            label="Escuchar dónde voy",
+        )
+    else:
+        speak_button("Llegaste a la meta. ¡Terminaste todos los retos!", label="Escuchar")
+
+    chips = ""
+    for lvl, (icon, name, color, _bg) in NIVELES.items():
+        idxs = [k for k, r in enumerate(RETOS) if r["nivel"] == lvl]
+        done = all(k < i for k in idxs)
+        current = (lvl == nivel_actual and i < total)
+        if done:
+            style, mark = f"background:{color}", "✅"
+        elif current:
+            style, mark = f"background:{color};outline:5px solid #FFD600", "👉"
+        else:
+            style, mark = "background:#B0BEC5", "🔒"
+        chips += f'<div class="chip" style="{style}">{mark} {icon} Nivel {lvl}<br>{name}</div>'
+    st.markdown(f'<div class="path">{chips}</div>', unsafe_allow_html=True)
+    st.progress(min(i / total, 1.0))
+
+    if i >= total:
+        if not st.session_state.reto_celebrado:
+            st.balloons()
+            st.session_state.reto_celebrado = True
+        msg(
+            "success",
+            f"🏆 ¡Terminaste todos los retos! Lograste {estrellas} de {total * 3} estrellas "
+            f"y {st.session_state.reto_puntos} puntos. ¡Felicidades!",
+            f"Terminaste todos los retos. Lograste {estrellas} estrellas de {total * 3} "
+            f"y {st.session_state.reto_puntos} puntos. ¡Felicidades!",
+        )
+        st.write("Puedes volver a jugar para conseguir más estrellas. No hay prisa.")
+        st.button("🔄 Jugar otra vez", key="reto_reiniciar", on_click=reiniciar_retos)
+    else:
+        reto = RETOS[i]
+        icon, name, color, bg = NIVELES[reto["nivel"]]
+        q_html = reto["q"].replace("$", "&#36;")
+        txt = "#263238"
+        st.markdown(
+            f'<div class="reto-card" style="background:{bg};border-color:{color};color:{txt}">'
+            f'<div style="font-weight:700;color:{color};margin-bottom:.3rem">{icon} Nivel {reto["nivel"]} · {name}</div>'
+            f'<div style="font-size:1.15em;font-weight:600;color:{txt}">{q_html}</div>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        opciones_voz = ", ".join(reto["op"])
+        speak_button(f"{reto['q']} Las opciones son: {opciones_voz}.", label="Escuchar la pregunta")
+
+        listo = st.session_state.reto_feedback == "ok"
+        cols = st.columns(len(reto["op"]))
+        for j, opt in enumerate(reto["op"]):
+            with cols[j]:
+                st.button(
+                    opt.replace("$", "\\$"), key=f"reto_{i}_{j}", use_container_width=True,
+                    disabled=listo, on_click=responder, args=(opt,),
+                )
+
+        fb = st.session_state.reto_feedback
+        if fb == "ok":
+            n = st.session_state.reto_estrellas[i]
+            msg(
+                "success",
+                f"¡Respuesta correcta! 🌟 {reto['exp']} Ganaste {'⭐' * n}",
+                f"¡Respuesta correcta! {reto['exp']}",
+            )
+            st.button(
+                "Ver mis resultados 🏆" if i == total - 1 else "Siguiente reto ➡️",
+                key="reto_siguiente", on_click=siguiente_reto, use_container_width=True,
+            )
+        elif fb == "fail":
+            msg(
+                "warning",
+                "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"],
+                "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"],
+            )
+
+elif section == "💬 Ayuda KikiPay":
+    header("💬 Ayuda KikiPay")
+    st.write("Escribe una pregunta. Esta versión usa explicaciones educativas preparadas; no necesita una API.")
+    question = st.text_input("¿Qué quieres aprender?", placeholder="Ej. ¿Qué significa ahorrar?")
+    if st.button("Ver explicación", key="ask_kikipay"):
+        q = question.lower().strip()
+        answers = [
+            (["ahorrar", "ahorro"], "Ahorrar significa guardar una parte del dinero para utilizarla después. Puedes elegir una meta y avanzar poco a poco."),
+            (["cambio", "vuelto"], "El cambio es el dinero que recibes cuando entregas más de lo que cuesta un producto. Resta: dinero entregado menos precio."),
+            (["presupuesto", "organizar"], "Un presupuesto es un plan para organizar el dinero que recibes y decidir cómo utilizarlo."),
+            (["necesidad", "deseo"], "Una necesidad es algo importante para vivir o estar bien, como alimentos o agua. Un deseo es algo que te gustaría tener, pero puede esperar."),
+            (["precio", "comparar"], "Para comparar precios, observa cuánto cuesta cada opción y qué cantidad o características ofrece."),
+        ]
+        reply = next((text for words, text in answers if any(word in q for word in words)), None)
+        if reply:
+            msg("success", reply)
+        elif q:
+            msg("info", "Puedo explicar: ahorro, cambio, presupuesto, necesidades, deseos y comparación de precios.")
+        else:
+            msg("warning", "Escribe una pregunta o una palabra sobre el tema.")
+    st.caption("Este asistente básico no es un chatbot generativo y no envía preguntas a internet.")
+
+elif section == "⚙️ Mi experiencia":
+    header("⚙️ Mi experiencia", "Mi experiencia. Adapta la aplicación a tus preferencias.")
+    st.write("Adapta la aplicación a tus preferencias.")
+    st.session_state.nombre = st.text_input("Nombre o apodo (opcional)", value=st.session_state.nombre)
+    st.session_state.tamano_letra = st.select_slider(
+        "Tamaño de letra", options=["Pequeña", "Mediana", "Grande", "Muy grande"],
+        value=st.session_state.tamano_letra,
+    )
+    st.session_state.alto_contraste = st.toggle("Activar alto contraste", value=st.session_state.alto_contraste)
+    st.session_state.mostrar_pistas = st.toggle(
+        "Mostrar instrucciones paso a paso", value=st.session_state.mostrar_pistas
+    )
+    st.session_state.mostrar_voz = st.toggle(
+        "Mostrar botones de voz 🔊", value=st.session_state.mostrar_voz
+    )
+
+    st.divider()
+    subheader("Datos de demostración", "Datos de demostración para practicar con ejemplos.")
+    demo_choice = st.toggle("Cargar ejemplo de demostración", value=st.session_state.modo_demo)
+    if demo_choice and not st.session_state.modo_demo:
+        st.session_state.movimientos = [
+            {"Fecha": str(date.today()), "Tipo": "Ingreso", "Concepto": "Dinero de práctica",
+             "Categoría": "Otro", "Cantidad": 200.0},
+            {"Fecha": str(date.today()), "Tipo": "Gasto", "Concepto": "Cuaderno",
+             "Categoría": "Educación", "Cantidad": 35.0},
+        ]
+        st.session_state.ahorro_actual = 120.0
+        st.session_state.meta_ahorro = 300.0
+        st.session_state.modo_demo = True
+        st.rerun()
+    elif not demo_choice and st.session_state.modo_demo:
+        st.session_state.movimientos = []
+        st.session_state.ahorro_actual = 0.0
+        st.session_state.meta_ahorro = 500.0
+        st.session_state.modo_demo = False
+        st.rerun()
+
+    speak_button("Hola, soy tu guía de KikiPay. Estoy aquí para acompañarte a tu ritmo.", label="Probar la voz")
+    msg("success", "Tus preferencias se aplican durante esta sesión.")
+    st.caption("La voz depende del dispositivo: en Edge, Chrome, Android y iPhone suele haber voces en español de México.")
+
+st.divider()
+st.caption(
+    "KikiPay Inclusivo · Herramienta educativa. No ofrece asesoría financiera, "
+    "no realiza pagos y no diagnostica. Utiliza datos ficticios o de práctica."
