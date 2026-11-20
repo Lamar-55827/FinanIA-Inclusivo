@@ -1,752 +1,792 @@
-"""
-Kiki Pay - Inclusión y Autonomía Financiera (Fase 3 corregida)
-"Tu dinero, tus decisiones, tu futuro"
-
-Interfaz en Streamlit. La lógica que se puede probar sin interfaz está en kiki_logica.py.
-
-ALMACENAMIENTO: todo se guarda SOLO en la sesión del navegador (st.session_state).
-Si se recarga la página o la app se reinicia, los datos se pierden. Para conservarlos
-la persona puede descargar una copia (JSON) en "Mi experiencia" y restaurarla después.
-Aún NO existe almacenamiento permanente en servidor ni panel familiar (Fase 4).
-"""
-import copy
-import random
 import re
+import json
+import streamlit as st
+import streamlit.components.v1 as components
+import pandas as pd
 from datetime import date
 
-import pandas as pd
-import streamlit as st
+st.set_page_config(page_title="FinanIA Inclusivo", page_icon="🌈", layout="wide")
 
-import kiki_logica as kl
+# ---------------------------------------------------------------
+# Estado de la sesión: los datos son temporales y pueden reiniciarse.
+# ---------------------------------------------------------------
+DEFAULTS = {
+    "movimientos": [],
+    "meta_ahorro": 500.0,
+    "ahorro_actual": 0.0,
+    "nombre": "",
+    "tamano_letra": "Mediana",
+    "alto_contraste": False,
+    "mostrar_pistas": True,
+    "mostrar_voz": True,
+    "modo_demo": True,
+    # Retos
+    "reto_i": 0,
+    "reto_intentos": 0,
+    "reto_feedback": None,
+    "reto_estrellas": {},
+    "reto_puntos": 0,
+    "reto_celebrado": False,
+}
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-st.set_page_config(page_title="Kiki Pay", page_icon="🪙", layout="wide")
+# ---------------------------------------------------------------
+# Apariencia accesible y colorida
+# ---------------------------------------------------------------
+font_sizes = {"Pequeña": 16, "Mediana": 18, "Grande": 21, "Muy grande": 24}
+font_px = font_sizes[st.session_state.tamano_letra]
+HC = st.session_state.alto_contraste
 
-SECCIONES = [
-    ("inicio", "Inicio", "🏠"),
-    ("dinero", "Conozco el dinero", "🪙"),
-    ("compras", "Practico compras", "🛍️"),
-    ("organizo", "Organizo mi dinero", "📊"),
-    ("ahorro", "Mi ahorro", "🌱"),
-    ("retos", "Retos", "🎮"),
-    ("kiki", "Pregúntale a Kiki", "💬"),
-    ("progreso", "Mi progreso", "📈"),
-    ("experiencia", "Mi experiencia", "⚙️"),
-]
-NOMBRES_DIFICULTAD = {1: "Fácil", 2: "Media", 3: "Reto"}
+if HC:
+    app_bg = "#101820"
+    fg, card, border = "#FFFFFF", "#202D38", "#FFFFFF"
+    sidebar_bg = "#000000"
+    btn_bg, btn_fg = "#FFD600", "#000000"
+else:
+    app_bg = ("linear-gradient(135deg,#FFE3F1 0%,#E4EEFF 30%,"
+              "#DDFBF0 60%,#FFF3C9 100%)")
+    fg, card, border = "#263238", "#FFFFFF", "#CBB8FF"
+    sidebar_bg = "linear-gradient(180deg,#7C4DFF 0%,#00B8A9 60%,#FFB300 100%)"
+    btn_bg, btn_fg = "linear-gradient(135deg,#7C4DFF,#00B8A9)", "#FFFFFF"
 
-
-# ============================================================ estado de sesión
-def init_estado():
-    """Crea las variables de sesión UNA vez; nunca las reinicia en cada ejecución."""
-    ss = st.session_state
-    ss.setdefault("movimientos", [])
-    ss.setdefault("metas", [])
-    ss.setdefault("sig_id", 1)
-    ss.setdefault("prefs", copy.deepcopy(kl.PREFS_DEFAULT))
-    ss.setdefault("progreso", copy.deepcopy(kl.PROGRESO_DEFAULT))
-    ss.setdefault("seccion", "inicio")
-    ss.setdefault("msgs", {})
-    ss.setdefault("contador", 0)
-    ss.setdefault("ej_dinero", None)
-    ss.setdefault("reto", None)
-    ss.setdefault("kiki_hist", [])
-
-
-def nuevo_id():
-    ss = st.session_state
-    valor = ss.sig_id
-    ss.sig_id += 1
-    return valor
-
-
-def nuevo_n():
-    st.session_state.contador += 1
-    return st.session_state.contador
-
-
-def poner_msg(clave, tipo, texto):
-    st.session_state.msgs[clave] = (tipo, texto)
-
-
-def quitar_msg(clave):
-    st.session_state.msgs.pop(clave, None)
-
-
-def mostrar_msg(clave):
-    m = st.session_state.msgs.get(clave)
-    if m:
-        {"ok": st.success, "info": st.info, "aviso": st.warning, "error": st.error}[m[0]](m[1])
-
-
-def iniciar_widget(pref):
-    """Los widgets de otras páginas pierden su valor; se reponen desde prefs."""
-    clave = "w_" + pref
-    if clave not in st.session_state:
-        st.session_state[clave] = st.session_state.prefs[pref]
-
-
-def cb_pref(pref):
-    st.session_state.prefs[pref] = st.session_state["w_" + pref]
-
-
-def ico(emoji):
-    return f"{emoji} " if st.session_state.prefs["pictos"] else ""
-
-
-def esc(texto):
-    return re.sub(r"([\\`*_{}\[\]()#+\-.!|<>$~])", r"\\\1", texto)
-
-
-def hay_datos():
-    ss = st.session_state
-    return bool(ss.movimientos or ss.metas)
-
-
-def pista(texto):
-    if st.session_state.prefs["pistas"]:
-        st.info("👣 " + texto)
-
-
-# ================================================================ estilos (CSS)
-CSS = """
+st.markdown(f"""
 <style>
-.stApp { background: __BG__; }
-.stApp h1,.stApp h2,.stApp h3,.stApp h4,.stApp p,.stApp li,.stApp label,
-.stApp [data-testid="stMetricLabel"],.stApp [data-testid="stMetricValue"],
-.stApp [data-testid="stCaptionContainer"],.stApp summary,.stApp summary p { color: __FG__; }
-.stApp p,.stApp li,.stApp label { font-size: __PX__px; }
-[data-testid="stSidebar"] { background: __SIDE__; }
-[data-testid="stAlert"] * { color: #111111 !important; }
-div.stButton > button, div.stFormSubmitButton > button, div.stDownloadButton > button {
-  min-height: 2.9rem; border-radius: 10px; font-weight: 600; border: 2px solid __BORDER__; }
-.kp-hero { padding: 1.2rem 1.4rem; border-radius: 14px; border: 2px solid __BORDER__;
-  background: __HERO__; margin-bottom: 1rem; }
-.kp-hero h1 { margin: 0; font-size: 2rem; }
-.kp-hero p { margin: .3rem 0 0 0; }
-.kp-piezas { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; margin:.6rem 0 1rem 0; }
-.kp-moneda { display:inline-flex; align-items:center; justify-content:center; width:4.2rem; height:4.2rem;
-  border-radius:50%; border:3px solid #000; font-weight:700; color:#000 !important; background:#D9D9D9; }
-.kp-moneda.kp-v1 { width:3.2rem; height:3.2rem; }
-.kp-moneda.kp-v2 { width:3.6rem; height:3.6rem; }
-.kp-moneda.kp-v5 { width:4rem; height:4rem; }
-.kp-moneda.kp-v10 { width:4.4rem; height:4.4rem; background: radial-gradient(circle,#E8C65A 46%,#C8C8C8 47%); }
-.kp-billete { display:inline-flex; align-items:center; justify-content:center; width:7rem; height:3.6rem;
-  border-radius:8px; border:3px solid #000; font-weight:700; color:#000 !important; }
-.kp-billete.kp-v20 { background:#9CC9F5; } .kp-billete.kp-v50 { background:#F4A6CF; }
-.kp-billete.kp-v100 { background:#F29A9A; } .kp-billete.kp-v200 { background:#A7DDA0; }
-__EXTRA__
+.stApp {{ background: {app_bg}; background-attachment: fixed; color: {fg}; }}
+html, body, [class*="st-"], p, label, li {{ font-size: {font_px}px; }}
+.block-container {{ max-width: 1180px; padding-top: 1.4rem; padding-bottom: 3rem; }}
+[data-testid="stSidebar"] {{ background: {sidebar_bg}; }}
+[data-testid="stSidebar"] * {{ color: #FFFFFF !important; }}
+.finania-hero {{ background: linear-gradient(120deg,#FF4D8D,#FF8A00,#00B894,#6C5CE7);
+  color:#FFFFFF; padding:1.35rem 1.5rem; border-radius:22px; margin-bottom:.6rem;
+  text-shadow: 0 2px 4px rgba(0,0,0,.35); box-shadow: 0 6px 18px rgba(108,92,231,.35); }}
+.finania-hero h1, .finania-hero h3, .finania-hero p {{ color:#FFFFFF; margin:.2rem 0; }}
+[data-testid="stMetric"] {{ background:{card}; border:2px solid {border};
+  border-left: 10px solid #FF6B9D; border-radius:16px; padding:.8rem 1rem;
+  box-shadow: 0 3px 10px rgba(0,0,0,.08); }}
+div.stButton > button, div.stFormSubmitButton > button {{
+  min-height:2.8rem; border-radius:14px; font-weight:700; border:none;
+  background:{btn_bg}; color:{btn_fg}; box-shadow: 0 3px 8px rgba(0,0,0,.18); }}
+div.stButton > button:hover, div.stFormSubmitButton > button:hover {{
+  transform: scale(1.03); filter: brightness(1.08); }}
+div.stButton > button p {{ color:{btn_fg}; }}
+.reto-card {{ border-radius:20px; padding:1.1rem 1.3rem; border:4px solid; margin:.5rem 0; }}
+.score-row {{ display:flex; gap:.7rem; flex-wrap:wrap; margin:.3rem 0 .6rem; }}
+.score {{ flex:1; min-width:140px; border-radius:16px; padding:.6rem .9rem;
+  color:#fff; font-weight:700; text-align:center; text-shadow:0 1px 3px rgba(0,0,0,.35); }}
+.path {{ display:flex; gap:.5rem; flex-wrap:wrap; margin:.4rem 0 .8rem; }}
+.chip {{ flex:1; min-width:110px; text-align:center; border-radius:999px; padding:.45rem .6rem;
+  font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35); }}
 </style>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------
+# Voz: usa la voz del navegador (Web Speech API) en español de México
+# ---------------------------------------------------------------
+SPEAK_JS = """
+(function(){
+  const synth = window.speechSynthesis;
+  function norm(v){ return (v.lang||'').replace('_','-').toLowerCase(); }
+  function pick(){
+    const vs = synth ? synth.getVoices() : [];
+    const prefer = ['dalia','sabina','paulina','mujer','female','google'];
+    const byName = list => {
+      for (const n of prefer){
+        const f = list.find(v => v.name.toLowerCase().includes(n));
+        if (f) return f;
+      }
+      return list[0];
+    };
+    let l = vs.filter(v => norm(v) === 'es-mx'); if (l.length) return byName(l);
+    l = vs.filter(v => norm(v) === 'es-us');     if (l.length) return byName(l);
+    l = vs.filter(v => norm(v).startsWith('es'));if (l.length) return byName(l);
+    return null;
+  }
+  if (synth){ synth.getVoices(); synth.onvoiceschanged = function(){ synth.getVoices(); }; }
+  window.hablar = function(text, btn){
+    if (!synth){ alert('Tu navegador no permite voz. Prueba con Chrome, Edge o Safari.'); return; }
+    const estabaHablando = synth.speaking && btn.classList.contains('on');
+    synth.cancel();
+    document.querySelectorAll('.b.on').forEach(b => b.classList.remove('on'));
+    if (estabaHablando) return;
+    const u = new SpeechSynthesisUtterance(text);
+    const v = pick();
+    if (v){ u.voice = v; u.lang = v.lang; } else { u.lang = 'es-MX'; }
+    u.rate = 0.9; u.pitch = 1.1; u.volume = 1;
+    btn.classList.add('on');
+    u.onend = u.onerror = function(){ btn.classList.remove('on'); };
+    synth.speak(u);
+  };
+})();
+"""
+
+BTN_CSS = """
+body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;}
+.b{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;cursor:pointer;
+   color:#fff;background:linear-gradient(135deg,#FF4D8D,#7C4DFF);border-radius:999px;
+   min-height:44px;min-width:44px;padding:0 12px;font-size:22px;
+   box-shadow:0 3px 8px rgba(0,0,0,.25);transition:transform .15s;}
+.b:hover{transform:scale(1.08);}
+.b span{font-size:16px;font-weight:700;}
+.b.on{background:linear-gradient(135deg,#00B894,#00C9FF);animation:pulso 1s infinite;}
+@keyframes pulso{0%{box-shadow:0 0 0 0 rgba(0,184,148,.7);}100%{box-shadow:0 0 0 14px rgba(0,184,148,0);}}
 """
 
 
-def construir_css(p):
-    px = kl.TAMANOS.get(p["tamano"], 18)
-    if p["contraste"]:
-        bg, fg, side, border, hero = "#000000", "#FFFFFF", "#111111", "#FFFFFF", "#000000"
-    elif p["reducir"]:
-        bg, fg, side, border, hero = "#F5F5F5", "#222222", "#EBEBEB", "#9A9A9A", "#FFFFFF"
+def clean_for_speech(text):
+    """Convierte texto con formato a algo que suene natural al leerlo."""
+    t = str(text)
+
+    def _money(m):
+        num = m.group(1).replace(",", "")
+        if num.endswith(".00"):
+            num = num[:-3]
+        return f"{num} pesos"
+
+    t = re.sub(r"\$\s?([\d,]+(?:\.\d+)?)(\s?MXN)?", _money, t)
+    t = re.sub(r"[\U0001F000-\U0001FFFF\u2600-\u27BF\uFE0F\u200d]", "", t)
+    t = t.replace("**", "").replace("*", "").replace("`", "")
+    t = t.replace("%", " por ciento").replace(" + ", " más ")
+    t = t.replace(" - ", " menos ").replace(" = ", " es igual a ")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def speak_button(text, label=None):
+    """Botón de altavoz. Al tocarlo lee el texto con voz cálida en español."""
+    if not st.session_state.mostrar_voz:
+        return
+    speech = json.dumps(clean_for_speech(text), ensure_ascii=False).replace("</", "<\\/")
+    inner = f"🔊<span>{label}</span>" if label else "🔊"
+    html = (
+        f"<style>{BTN_CSS}</style>"
+        f'<button class="b" aria-label="Escuchar" title="Escuchar" '
+        f'onclick="hablar({speech}, this)">{inner}</button>'
+        f"<script>{SPEAK_JS}</script>"
+    )
+    components.html(html, height=54)
+
+
+def md_safe(text):
+    """Evita que Streamlit interprete el signo $ como fórmula."""
+    return str(text).replace("$", "\\$")
+
+
+def header(text, speech=None):
+    if st.session_state.mostrar_voz:
+        c1, c2 = st.columns([1, 10], vertical_alignment="center")
+        with c1:
+            speak_button(speech or text)
+        with c2:
+            st.header(md_safe(text))
     else:
-        bg, fg, side, border, hero = "#FBF9FF", "#25213A", "#F1ECFA", "#B9AEDD", \
-            "linear-gradient(135deg,#EDE7FB,#E3F4F1)"
-    extra = ""
-    if p["reducir"]:
-        extra = "*,*::before,*::after{animation:none !important;transition:none !important;scroll-behavior:auto !important;}"
-    return (CSS.replace("__BG__", bg).replace("__FG__", fg).replace("__SIDE__", side)
-            .replace("__BORDER__", border).replace("__HERO__", hero)
-            .replace("__PX__", str(px)).replace("__EXTRA__", extra))
+        st.header(md_safe(text))
 
 
-def html_piezas(items):
-    partes = []
-    for tipo, valor, n in items:
-        clase = "kp-billete" if tipo == "billete" else "kp-moneda"
-        for _ in range(n):
-            partes.append(f'<span class="{clase} kp-v{valor}" role="img" '
-                          f'aria-label="{tipo} de {valor} pesos">${valor}</span>')
-    return '<div class="kp-piezas">' + "".join(partes) + "</div>"
-
-
-def mostrar_piezas(items, titulo=None):
-    """Muestra piezas de dinero según el modo elegido en 'Mi forma de aprender'."""
-    modo = st.session_state.prefs["modo"]
-    if titulo:
-        st.markdown(f"**{titulo}**")
-    if modo == "Solo números":
-        st.write(kl.describir_piezas(items))
-        return
-    st.markdown(html_piezas(items), unsafe_allow_html=True)
-    if modo == "Pictogramas":
-        st.write("Cuenta paso a paso: " + kl.conteo_progresivo(items))
+def subheader(text, speech=None):
+    if st.session_state.mostrar_voz:
+        c1, c2 = st.columns([1, 10], vertical_alignment="center")
+        with c1:
+            speak_button(speech or text)
+        with c2:
+            st.subheader(md_safe(text))
     else:
-        st.write("Operación: " + kl.expresion_suma(items))
+        st.subheader(md_safe(text))
 
 
-# ================================================================ barra lateral
-def etiqueta_seccion(id_):
-    _, nombre, emoji = next(s for s in SECCIONES if s[0] == id_)
-    return f"{emoji} {nombre}" if st.session_state.prefs["pictos"] else nombre
-
-
-def barra_lateral():
-    p = st.session_state.prefs
-    st.sidebar.title(ico("🪙") + "Kiki Pay")
-    st.sidebar.caption("Tu dinero, tus decisiones, tu futuro")
-    if p["nombre"].strip():
-        st.sidebar.markdown(f"¡Hola, {esc(p['nombre'].strip())}!")
-    st.sidebar.radio("Elige una sección:", [s[0] for s in SECCIONES],
-                     format_func=etiqueta_seccion, key="seccion")
-    with st.sidebar.expander("Mi forma de aprender", expanded=False):
-        iniciar_widget("modo")
-        st.radio("¿Cómo quiero ver el dinero?", kl.MODOS, key="w_modo",
-                 on_change=cb_pref, args=("modo",))
-        iniciar_widget("dificultad")
-        st.select_slider("Dificultad de los ejercicios", options=[1, 2, 3],
-                         format_func=lambda n: NOMBRES_DIFICULTAD[n], key="w_dificultad",
-                         on_change=cb_pref, args=("dificultad",))
-    st.sidebar.caption("Datos de práctica. No escribas datos bancarios reales.")
-
-
-# ============================================================== callbacks datos
-def cb_ir(destino):
-    st.session_state["seccion"] = destino
-
-
-def cb_cargar_demo():
-    ss = st.session_state
-    ss.movimientos, ss.metas, ss.sig_id = kl.datos_demo(date.today())
-    ss["conf_demo"] = False
-    poner_msg("datos", "ok", "Listo: cargué datos FICTICIOS de ejemplo para practicar.")
-
-
-def cb_borrar_todo():
-    ss = st.session_state
-    ss.movimientos, ss.metas, ss.sig_id = [], [], 1
-    ss.progreso = copy.deepcopy(kl.PROGRESO_DEFAULT)
-    ss.kiki_hist, ss.ej_dinero, ss.reto = [], None, None
-    ss["conf_borrar"] = False
-    poner_msg("datos", "ok", "Borré tus datos de práctica. Tus preferencias se conservan.")
-
-
-def cb_restaurar():
-    ss = st.session_state
-    archivo = ss.get("w_respaldo")
-    if archivo is None:
-        poner_msg("datos", "aviso", "Primero elige un archivo de copia de seguridad.")
-        return
-    try:
-        texto = archivo.getvalue().decode("utf-8")
-    except (UnicodeDecodeError, AttributeError):
-        poner_msg("datos", "error", "No pude leer ese archivo.")
-        return
-    estado, error = kl.importar_estado(texto)
-    if error:
-        poner_msg("datos", "error", error)
-        return
-    ss.movimientos, ss.metas, ss.sig_id = estado["movimientos"], estado["metas"], estado["sig_id"]
-    ss.prefs, ss.progreso = estado["prefs"], estado["progreso"]
-    for pref, valor in ss.prefs.items():
-        ss["w_" + pref] = valor
-    ss.ej_dinero, ss.reto = None, None
-    ss["conf_restaurar"] = False
-    poner_msg("datos", "ok", "Copia restaurada correctamente.")
-
-
-# ===================================================================== páginas
-def pagina_inicio():
-    ss = st.session_state
-    st.markdown(
-        '<div class="kp-hero"><h1>Kiki Pay</h1><p><b>Tu dinero, tus decisiones, tu futuro</b></p>'
-        '<p>Practica a tu ritmo: reconoce el dinero, haz compras de práctica, organiza lo que recibes y gastas, '
-        'y ahorra para tus metas.</p></div>', unsafe_allow_html=True)
-    nombre = ss.prefs["nombre"].strip()
-    st.subheader(f"¡Hola, {esc(nombre)}!" if nombre else "¡Hola!")
-    ingresos, gastos, saldo = kl.totales(ss.movimientos)
-    ahorro = sum(m["ahorrado"] for m in ss.metas)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Dinero disponible (práctica)", kl.formato_dinero(saldo))
-    c2.metric("Ahorrado en mis metas", kl.formato_dinero(ahorro))
-    c3.metric("Metas", len(ss.metas))
-    mostrar_msg("datos")
-    if not hay_datos():
-        pista("Aún no hay datos. Puedes empezar en blanco o cargar un ejemplo ficticio para ver cómo funciona.")
-        st.button("Cargar ejemplo ficticio", on_click=cb_cargar_demo, key="inicio_demo")
-    st.subheader("¿Por dónde quieres empezar?")
-    tarjetas = [
-        ("dinero", "🪙", "Conozco el dinero", "Monedas y billetes, sumar y restar."),
-        ("compras", "🛍️", "Practico compras", "Elige un producto y calcula tu cambio."),
-        ("organizo", "📊", "Organizo mi dinero", "Anota lo que recibes y lo que gastas."),
-        ("ahorro", "🌱", "Mi ahorro", "Crea metas y mira tu avance."),
-        ("retos", "🎮", "Retos", "Practica con situaciones cotidianas."),
-        ("kiki", "💬", "Pregúntale a Kiki", "Explicaciones sencillas."),
-    ]
-    for fila in range(0, len(tarjetas), 3):
-        cols = st.columns(3)
-        for col, (id_, emoji, titulo, desc) in zip(cols, tarjetas[fila:fila + 3]):
-            with col:
-                with st.container(border=True):
-                    st.markdown(f"**{ico(emoji)}{titulo}**")
-                    st.write(desc)
-                    st.button("Abrir", key=f"ir_{id_}", on_click=cb_ir, args=(id_,))
-
-
-# ---- Conozco el dinero
-def cb_nuevo_dinero():
-    ss = st.session_state
-    ej = kl.generar_ejercicio_dinero(ss.prefs["dificultad"], random.Random())
-    ej["n"] = nuevo_n()
-    ej["resuelto"] = False
-    ss.ej_dinero = ej
-    quitar_msg("dinero")
-
-
-def cb_comprobar_dinero():
-    ss = st.session_state
-    ej = ss.ej_dinero
-    if not ej:
-        return
-    eleccion = ss.get(f"resp_dinero_{ej['n']}")
-    if eleccion is None:
-        poner_msg("dinero", "aviso", "Elige una respuesta y vuelve a pulsar «Comprobar».")
-        return
-    ss.progreso["dinero_total"] += 1
-    if int(eleccion) == ej["total"]:
-        ss.progreso["dinero_ok"] += 1
-        ej["resuelto"] = True
-        poner_msg("dinero", "ok",
-                  f"¡Muy bien! Son {kl.formato_dinero(ej['total'])}. "
-                  f"{kl.expresion_suma(ej['items'])} = {ej['total']}.")
+def msg(kind, text, speech=None):
+    """Mensaje (info, success, warning, error) con altavoz al lado."""
+    if st.session_state.mostrar_voz:
+        c1, c2 = st.columns([1, 10], vertical_alignment="center")
+        with c1:
+            speak_button(speech or text)
+        with c2:
+            getattr(st, kind)(md_safe(text))
     else:
-        poner_msg("dinero", "info",
-                  "Casi. Cuenta otra vez, una pieza a la vez. Puedes intentarlo de nuevo cuando quieras.")
+        getattr(st, kind)(md_safe(text))
 
 
-def cb_comprobar_suma():
-    ss = st.session_state
-    a, b, op = ss.get("sum_a"), ss.get("sum_b"), ss.get("sum_op", "Sumar")
-    r = ss.get("sum_res")
-    if a is None or b is None or r is None:
-        return
-    if op == "Restar" and b > a:
-        poner_msg("suma", "aviso", "Para restar, elige una primera cantidad mayor o igual que la segunda.")
-        return
-    esperado = a + b if op == "Sumar" else a - b
-    ss.progreso["suma_total"] += 1
-    if int(r) == esperado:
-        ss.progreso["suma_ok"] += 1
-        simbolo = "+" if op == "Sumar" else "−"
-        poner_msg("suma", "ok", f"¡Correcto! {a} {simbolo} {b} = {esperado}.")
+def prompt(text, speech=None):
+    """Una línea de instrucción con su altavoz."""
+    if st.session_state.mostrar_voz:
+        c1, c2 = st.columns([1, 10], vertical_alignment="center")
+        with c1:
+            speak_button(speech or text)
+        with c2:
+            st.markdown("**" + md_safe(text) + "**")
     else:
-        poner_msg("suma", "info", "No es esa todavía. Inténtalo otra vez; puedes usar tus dedos o dibujar las monedas.")
+        st.markdown("**" + md_safe(text) + "**")
 
 
-def limpiar_suma():
-    quitar_msg("suma")
+def hint(message):
+    if st.session_state.mostrar_pistas:
+        msg("info", "**Paso a paso:** " + message, "Paso a paso. " + message)
 
 
-def pagina_dinero():
-    ss = st.session_state
-    st.header(ico("🪙") + "Conozco el dinero")
-    st.caption("Cambia entre pictogramas, imagen con número o solo números en «Mi forma de aprender» (barra lateral).")
-    pista("Mira las monedas y billetes, cuenta cuánto dinero hay en total y elige la respuesta.")
-    if ss.ej_dinero is None or ss.ej_dinero["nivel"] != ss.prefs["dificultad"]:
-        cb_nuevo_dinero()
-    ej = ss.ej_dinero
-    mostrar_piezas(ej["items"], "¿Cuánto dinero hay aquí?")
-    st.radio("Elige tu respuesta:", ej["opciones"], index=None, format_func=kl.formato_dinero,
-             key=f"resp_dinero_{ej['n']}", horizontal=True, disabled=ej["resuelto"])
-    c1, c2 = st.columns(2)
-    c1.button("Comprobar", key="btn_comprobar_dinero", on_click=cb_comprobar_dinero,
-              disabled=ej["resuelto"], type="primary")
-    c2.button("Otro ejercicio", key="btn_nuevo_dinero", on_click=cb_nuevo_dinero)
-    mostrar_msg("dinero")
-    if ej["resuelto"]:
-        st.write("Hay: " + kl.describir_piezas(ej["items"]) + ".")
-
-    st.divider()
-    st.subheader(ico("➕") + "Practico sumas y restas")
-    st.radio("Operación", ["Sumar", "Restar"], key="sum_op", horizontal=True, on_change=limpiar_suma)
-    valores = [1, 2, 5, 10, 20, 50]
-    ss.setdefault("sum_a", 10)
-    ss.setdefault("sum_b", 5)
-    ca, cb = st.columns(2)
-    ca.selectbox("Primera cantidad", valores, key="sum_a", on_change=limpiar_suma)
-    cb.selectbox("Segunda cantidad", valores, key="sum_b", on_change=limpiar_suma)
-    simbolo = "+" if ss.get("sum_op", "Sumar") == "Sumar" else "−"
-    st.write(f"**{ss.sum_a} {simbolo} {ss.sum_b} = ?**")
-    st.number_input("Tu resultado", min_value=0, max_value=200, step=1, key="sum_res", on_change=limpiar_suma)
-    st.button("Comprobar operación", key="btn_suma", on_click=cb_comprobar_suma, type="primary")
-    mostrar_msg("suma")
-
-
-# ---- Practico compras
-def cb_registrar_compra():
-    ss = st.session_state
-    nombre = ss.get("compra_prod")
-    if nombre not in kl.PRODUCTOS:
-        return
-    _emoji, precio, categoria = kl.PRODUCTOS[nombre]
-    mov, error = kl.crear_movimiento("Gasto", precio, categoria, f"Compra de práctica: {nombre}",
-                                     date.today(), ss.sig_id)
-    if error:
-        poner_msg("compras", "error", error)
-        return
-    ss.sig_id += 1
-    ss.movimientos.append(mov)
-    ss.progreso["compras"] += 1
-    poner_msg("compras", "ok", f"Registré «{nombre}» como gasto de práctica por {kl.formato_dinero(precio)}. "
-              "Puedes verlo en «Organizo mi dinero».")
-
-
-def pagina_compras():
-    ss = st.session_state
-    st.header(ico("🛍️") + "Practico compras")
-    pista("1) Elige un producto. 2) Elige con cuánto dinero pagas. 3) Mira si alcanza y cuánto te regresan.")
-    nombres = list(kl.PRODUCTOS)
-    ss.setdefault("compra_pago", 50)
-    st.selectbox("Producto", nombres, key="compra_prod",
-                 format_func=lambda n: f"{kl.PRODUCTOS[n][0]} {n} — {kl.formato_dinero(kl.PRODUCTOS[n][1])}")
-    st.select_slider("Dinero que entrego", options=[10, 20, 50, 100, 200, 500], key="compra_pago",
-                     format_func=kl.formato_dinero)
-    nombre, pago = ss.compra_prod, ss.compra_pago
-    emoji, precio, _ = kl.PRODUCTOS[nombre]
-    r = kl.calcular_cambio(precio, pago)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Precio", kl.formato_dinero(precio))
-    c2.metric("Entrego", kl.formato_dinero(pago))
-    if r["suficiente"]:
-        c3.metric("Mi cambio", kl.formato_dinero(r["cambio"]))
-        st.success(f"Sí alcanza. {pago} − {precio} = {r['cambio']}.")
-        if r["cambio"] > 0:
-            mostrar_piezas(kl.desglose_cambio(r["cambio"]), "Te regresan:")
+def card(icon, title, desc, accent, bg, height=215):
+    """Tarjeta colorida con su propio altavoz."""
+    if HC:
+        bg, text_color = "#202D38", "#FFFFFF"
+        accent = "#FFD600"
     else:
-        c3.metric("Me falta", kl.formato_dinero(r["falta"]))
-        st.warning(f"No alcanza todavía: faltan {kl.formato_dinero(r['falta'])}. Puedes entregar más dinero o elegir otro producto.")
-    _i, _g, saldo = kl.totales(ss.movimientos)
-    if hay_datos():
-        if saldo >= precio:
-            st.write(f"Con tu dinero disponible de práctica ({kl.formato_dinero(saldo)}) sí podrías comprarlo.")
-        else:
-            st.write(f"Tu dinero disponible de práctica es {kl.formato_dinero(saldo)}: por ahora no alcanzaría.")
-    st.button("Registrar esta compra como gasto de práctica", key="btn_registrar_compra",
-              on_click=cb_registrar_compra, disabled=not r["suficiente"])
-    mostrar_msg("compras")
-    st.divider()
-    st.subheader(ico("⚖️") + "Comparo productos")
-    elegidos = st.multiselect("Elige dos o más productos", nombres, key="compare_prods")
-    if len(elegidos) >= 2:
-        filas = sorted(({"Producto": f"{kl.PRODUCTOS[n][0]} {n}", "Precio": kl.PRODUCTOS[n][1]} for n in elegidos),
-                       key=lambda f: f["Precio"])
-        st.dataframe(pd.DataFrame(filas), hide_index=True)
-        st.write(f"El que cuesta menos es **{filas[0]['Producto']}** ({kl.formato_dinero(filas[0]['Precio'])}).")
-    else:
-        st.caption("Elige al menos dos productos para compararlos.")
+        text_color = "#263238"
+    speech = json.dumps(clean_for_speech(f"{title}. {desc}"), ensure_ascii=False)
+    html = f"""
+<style>
+{BTN_CSS}
+.c{{background:{bg};border:4px solid {accent};border-radius:20px;padding:14px 16px;
+    height:{height - 30}px;box-sizing:border-box;position:relative;
+    box-shadow:0 4px 12px rgba(0,0,0,.12);}}
+.ic{{font-size:46px;line-height:1;}}
+h4{{margin:6px 0 4px;color:{text_color};font-size:{font_px + 2}px;}}
+p{{margin:0;color:{text_color};font-size:{font_px - 1}px;}}
+.sp{{position:absolute;top:10px;right:10px;}}
+</style>
+<div class="c">
+  <div class="sp"><button class="b" aria-label="Escuchar" onclick='hablar({speech}, this)'>🔊</button></div>
+  <div class="ic">{icon}</div>
+  <h4>{title}</h4>
+  <p>{desc}</p>
+</div>
+<script>{SPEAK_JS}</script>
+"""
+    components.html(html, height=height)
 
 
-# ---- Organizo mi dinero
-def cb_borrar_movimiento():
-    ss = st.session_state
-    id_ = ss.get("borrar_mov")
-    if id_ is None:
-        poner_msg("movs", "aviso", "Elige primero el movimiento que quieres borrar.")
-        return
-    ss.movimientos = [m for m in ss.movimientos if m["id"] != id_]
-    ss["borrar_mov"] = None
-    poner_msg("movs", "ok", "Movimiento borrado.")
+def money(value):
+    return f"${value:,.2f} MXN"
 
 
-def cb_borrar_movimientos_todos():
-    ss = st.session_state
-    ss.movimientos = []
-    ss["conf_borrar_movs"] = False
-    poner_msg("movs", "ok", "Borré todos los movimientos.")
+def totals():
+    income = sum(x["Cantidad"] for x in st.session_state.movimientos if x["Tipo"] == "Ingreso")
+    expense = sum(x["Cantidad"] for x in st.session_state.movimientos if x["Tipo"] == "Gasto")
+    return income, expense, income - expense
 
 
-def pagina_organizo():
-    ss = st.session_state
-    st.header(ico("📊") + "Organizo mi dinero")
-    pista("Primero elige si es un ingreso (dinero que recibes) o un gasto (dinero que pagas). Luego llena el formulario y pulsa «Guardar».")
-    ss.setdefault("mov_tipo", "Ingreso")
-    st.radio("¿Qué quieres anotar?", ["Ingreso", "Gasto"], key="mov_tipo", horizontal=True)
-    tipo = ss.mov_tipo
-    with st.form("form_mov", clear_on_submit=True):
-        categoria = st.selectbox("Categoría", kl.CATEGORIAS[tipo], key="mov_cat")
-        cantidad = st.number_input("Cantidad ($)", min_value=0.0, step=1.0, format="%.2f", key="mov_cant")
-        descripcion = st.text_input("Descripción (opcional)", max_chars=kl.MAX_DESCRIPCION, key="mov_desc")
-        fecha = st.date_input("Fecha", value=date.today(), key="mov_fecha")
-        enviado = st.form_submit_button("Guardar", type="primary")
-    if enviado:
-        mov, error = kl.crear_movimiento(tipo, cantidad, categoria, descripcion, fecha, ss.sig_id)
-        if error:
-            st.error(error)
-        else:
-            ss.sig_id += 1
-            ss.movimientos.append(mov)
-            st.success(f"Guardado: {tipo.lower()} de {kl.formato_dinero(mov['cantidad'])} en «{mov['categoria']}».")
-    ingresos, gastos, saldo = kl.totales(ss.movimientos)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ingresos totales", kl.formato_dinero(ingresos))
-    c2.metric("Gastos totales", kl.formato_dinero(gastos))
-    c3.metric("Saldo disponible", kl.formato_dinero(saldo))
-    if saldo < 0:
-        st.warning("Gastaste más de lo que registraste como ingreso. Revisa tus movimientos o planea con calma tus próximos gastos.")
-    mostrar_msg("movs")
-    if not ss.movimientos:
-        st.info("Todavía no hay movimientos. Guarda el primero con el formulario o carga el ejemplo en «Mi experiencia».")
-        return
-    por_cat = kl.gastos_por_categoria(ss.movimientos)
-    if por_cat:
-        st.subheader("¿En qué gasto mi dinero?")
-        st.bar_chart(pd.Series(por_cat, name="Gasto"))
-        for cat, val in por_cat.items():
-            st.write(f"• {cat}: {kl.formato_dinero(val)} ({val / gastos * 100:.0f}% de tus gastos)")
-    st.subheader("Mis movimientos")
-    df = pd.DataFrame([{"Fecha": m["fecha"], "Tipo": m["tipo"], "Categoría": m["categoria"],
-                        "Descripción": m["descripcion"], "Cantidad": m["cantidad"], "_id": m["id"]}
-                       for m in ss.movimientos]).sort_values(["Fecha", "_id"], ascending=False)
-    st.dataframe(df.drop(columns="_id"), hide_index=True)
-    st.download_button("Descargar mis movimientos (CSV)", df.drop(columns="_id").to_csv(index=False).encode("utf-8-sig"),
-                       file_name="kiki_pay_movimientos.csv", mime="text/csv", key="dl_csv")
-    with st.expander("Borrar movimientos"):
-        ids = [m["id"] for m in ss.movimientos]
-        etiquetas = {m["id"]: f"{m['fecha']} · {m['tipo']} · {kl.formato_dinero(m['cantidad'])} · {m['descripcion']}"
-                     for m in ss.movimientos}
-        st.selectbox("Movimiento a borrar", ids, index=None, key="borrar_mov",
-                     format_func=lambda i: etiquetas[i], placeholder="Elige uno")
-        st.button("Borrar el movimiento elegido", key="btn_borrar_mov", on_click=cb_borrar_movimiento)
-        st.checkbox("Quiero borrar TODOS los movimientos", key="conf_borrar_movs")
-        st.button("Borrar todos", key="btn_borrar_movs_todos", on_click=cb_borrar_movimientos_todos,
-                  disabled=not ss.get("conf_borrar_movs", False))
+def add_movement(kind, concept, category, amount):
+    st.session_state.movimientos.append({
+        "Fecha": str(date.today()),
+        "Tipo": kind,
+        "Concepto": concept or category,
+        "Categoría": category,
+        "Cantidad": float(amount),
+    })
 
 
-# ---- Mi ahorro
-def cb_agregar_ahorro(id_):
-    ss = st.session_state
-    meta = next((m for m in ss.metas if m["id"] == id_), None)
-    if meta is None:
-        return
-    nueva, error = kl.agregar_ahorro(meta, ss.get(f"meta_add_{id_}", 0))
-    if error:
-        poner_msg(f"meta_{id_}", "aviso", error)
-        return
-    ss.metas = [nueva if m["id"] == id_ else m for m in ss.metas]
-    ss[f"meta_add_{id_}"] = 0.0
-    poner_msg(f"meta_{id_}", "ok", kl.mensaje_meta(nueva))
-
-
-def cb_borrar_meta(id_):
-    ss = st.session_state
-    ss.metas = [m for m in ss.metas if m["id"] != id_]
-    quitar_msg(f"meta_{id_}")
-
-
-def pagina_ahorro():
-    ss = st.session_state
-    st.header(ico("🌱") + "Mi ahorro")
-    pista("Crea una meta, escribe cuánto cuesta y agrega lo que vayas ahorrando. La barra te muestra tu avance.")
-    with st.form("form_meta", clear_on_submit=True):
-        nombre = st.text_input("¿Qué quieres lograr?", max_chars=60, key="meta_nombre",
-                               placeholder="Por ejemplo: audífonos")
-        objetivo = st.number_input("¿Cuánto cuesta? ($)", min_value=0.0, step=10.0, format="%.2f", key="meta_obj")
-        inicial = st.number_input("¿Cuánto llevas ahorrado? ($)", min_value=0.0, step=5.0, format="%.2f", key="meta_ini")
-        enviado = st.form_submit_button("Crear meta", type="primary")
-    if enviado:
-        meta, error = kl.crear_meta(nombre, objetivo, inicial, ss.sig_id)
-        if error:
-            st.error(error)
-        else:
-            ss.sig_id += 1
-            ss.metas.append(meta)
-            st.success(f"Meta «{meta['nombre']}» creada.")
-    if not ss.metas:
-        st.info("Todavía no tienes metas. Crea la primera arriba.")
-        return
-    for meta in list(ss.metas):
-        id_ = meta["id"]
-        with st.container(border=True):
-            st.subheader(esc(meta["nombre"]))
-            st.progress(kl.progreso_meta(meta))
-            st.write(f"Llevas **{kl.formato_dinero(meta['ahorrado'])}** de **{kl.formato_dinero(meta['objetivo'])}** "
-                     f"({kl.progreso_meta(meta) * 100:.0f}%). Te faltan **{kl.formato_dinero(kl.falta_meta(meta))}**.")
-            st.caption(kl.mensaje_meta(meta))
-            ss.setdefault(f"meta_add_{id_}", 0.0)
-            ss.setdefault(f"meta_sem_{id_}", 10.0)
-            c1, c2 = st.columns([2, 1])
-            c1.number_input("Cantidad que agrego ($)", min_value=0.0, step=5.0, format="%.2f", key=f"meta_add_{id_}")
-            c2.button("Agregar al ahorro", key=f"btn_add_{id_}", on_click=cb_agregar_ahorro, args=(id_,), type="primary")
-            mostrar_msg(f"meta_{id_}")
-            if kl.falta_meta(meta) > 0:
-                st.number_input("¿Cuánto podría ahorrar por semana? ($)", min_value=0.0, step=5.0, format="%.2f",
-                                key=f"meta_sem_{id_}")
-                semanas = kl.semanas_para_meta(kl.falta_meta(meta), ss[f"meta_sem_{id_}"])
-                if semanas:
-                    st.write(f"Ahorrando esa cantidad cada semana, lo lograrías en **{semanas} semana(s)**.")
-            st.button("Borrar esta meta", key=f"btn_del_{id_}", on_click=cb_borrar_meta, args=(id_,))
-
-
-# ---- Retos
-def cb_nuevo_reto():
-    ss = st.session_state
-    reto = kl.generar_reto(ss.prefs["dificultad"], random.Random())
-    reto["n"] = nuevo_n()
-    reto["resuelto"] = False
-    ss.reto = reto
-    quitar_msg("reto")
-
-
-def cb_comprobar_reto():
-    ss = st.session_state
-    reto = ss.reto
-    if not reto:
-        return
-    eleccion = ss.get(f"resp_reto_{reto['n']}")
-    if eleccion is None:
-        poner_msg("reto", "aviso", "Elige una respuesta y vuelve a pulsar «Comprobar».")
-        return
-    ss.progreso["retos_total"] += 1
-    if eleccion == reto["correcta"]:
-        ss.progreso["retos_ok"] += 1
-        reto["resuelto"] = True
-        poner_msg("reto", "ok", "¡Muy bien! " + reto["explicacion"])
-    else:
-        poner_msg("reto", "info", "Todavía no. " + reto["pista"] + " Puedes intentarlo otra vez.")
-
-
-def pagina_retos():
-    ss = st.session_state
-    st.header(ico("🎮") + "Retos")
-    pista("Lee con calma, elige una respuesta y pulsa «Comprobar». Si te equivocas, puedes intentarlo otra vez.")
-    if ss.reto is None or ss.reto["nivel"] != ss.prefs["dificultad"]:
-        cb_nuevo_reto()
-    reto = ss.reto
-    st.subheader(reto["pregunta"])
-    st.radio("Elige tu respuesta:", reto["opciones"], index=None, key=f"resp_reto_{reto['n']}",
-             disabled=reto["resuelto"])
-    c1, c2 = st.columns(2)
-    c1.button("Comprobar", key="btn_comprobar_reto", on_click=cb_comprobar_reto,
-              disabled=reto["resuelto"], type="primary")
-    c2.button("Nuevo reto", key="btn_nuevo_reto", on_click=cb_nuevo_reto)
-    mostrar_msg("reto")
-    pr = ss.progreso
-    st.caption(f"Has acertado {pr['retos_ok']} de {pr['retos_total']} intentos. Cada intento te ayuda a aprender.")
-
-
-# ---- Kiki
-def cb_explicar_tema():
-    ss = st.session_state
-    entrada = kl.entrada_por_id(ss.get("kiki_tema"))
-    if entrada is None:
-        return
-    ss.kiki_hist.insert(0, {"pregunta": entrada["titulo"], "titulo": entrada["titulo"],
-                            "texto": entrada["texto"], "aviso": "", "tipo": "respuesta"})
-    del ss.kiki_hist[8:]
-
-
-def pagina_kiki():
-    ss = st.session_state
-    st.header(ico("💬") + "Pregúntale a Kiki")
-    st.caption("Kiki responde con explicaciones preparadas (sin internet ni servicios de pago). "
-               "No da asesoría personalizada y nunca necesita tus datos bancarios.")
-    with st.form("form_kiki", clear_on_submit=True):
-        pregunta = st.text_input("Escribe tu pregunta", max_chars=200, key="kiki_q",
-                                 placeholder="Por ejemplo: ¿qué es ahorrar?")
-        enviado = st.form_submit_button("Preguntar a Kiki", type="primary")
-    if enviado:
-        resp = kl.buscar_respuesta(pregunta)
-        resp["pregunta"] = pregunta.strip()
-        ss.kiki_hist.insert(0, resp)
-        del ss.kiki_hist[8:]
-    ids = [e["id"] for e in kl.BASE_KIKI]
-    st.selectbox("O elige un tema", ids, index=None, key="kiki_tema", placeholder="Elige un tema",
-                 format_func=lambda i: kl.entrada_por_id(i)["titulo"])
-    st.button("Explicar este tema", key="btn_kiki_tema", on_click=cb_explicar_tema)
-    if not ss.kiki_hist:
-        st.info("Aquí aparecerán las respuestas de Kiki.")
-    for r in ss.kiki_hist:
-        with st.container(border=True):
-            if r.get("pregunta"):
-                st.caption("Tu pregunta: " + r["pregunta"])
-            if r.get("titulo"):
-                st.markdown(f"**{r['titulo']}**")
-            st.write(r["texto"])
-            if r.get("aviso"):
-                st.warning(r["aviso"])
-
-
-# ---- Mi progreso
-def pagina_progreso():
-    ss = st.session_state
-    st.header(ico("📈") + "Mi progreso")
-    st.caption("Esto lo ves solo tú, en esta sesión. Todavía no existe un panel para familiares (llegará en una fase posterior).")
-    ingresos, gastos, saldo = kl.totales(ss.movimientos)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Ingresos", kl.formato_dinero(ingresos))
-    c2.metric("Gastos", kl.formato_dinero(gastos))
-    c3.metric("Disponible", kl.formato_dinero(saldo))
-    c4.metric("Ahorrado en metas", kl.formato_dinero(sum(m["ahorrado"] for m in ss.metas)))
-    st.subheader("Lo que he practicado")
-    st.dataframe(pd.DataFrame(kl.habilidades(ss.progreso)), hide_index=True)
-    if ss.metas:
-        st.subheader("Mis metas")
-        for m in ss.metas:
-            st.write(f"• {esc(m['nombre'])}: {kl.progreso_meta(m) * 100:.0f}% ({kl.formato_dinero(m['ahorrado'])} de {kl.formato_dinero(m['objetivo'])})")
-
-
-# ---- Mi experiencia
-def pagina_experiencia():
-    ss = st.session_state
-    st.header(ico("⚙️") + "Mi experiencia")
-    st.caption("Los cambios se aplican enseguida.")
-    iniciar_widget("nombre")
-    st.text_input("Mi nombre o apodo (opcional)", max_chars=40, key="w_nombre", on_change=cb_pref, args=("nombre",))
-    iniciar_widget("tamano")
-    st.select_slider("Tamaño de letra", options=list(kl.TAMANOS), key="w_tamano", on_change=cb_pref, args=("tamano",))
-    for pref, texto in (("contraste", "Alto contraste"),
-                        ("pistas", "Mostrar instrucciones paso a paso"),
-                        ("reducir", "Reducir estímulos visuales (sin degradados ni movimiento)"),
-                        ("pictos", "Mostrar pictogramas (íconos)")):
-        iniciar_widget(pref)
-        st.toggle(texto, key="w_" + pref, on_change=cb_pref, args=(pref,))
-    st.caption("El modo de ver el dinero y la dificultad se cambian en «Mi forma de aprender», en la barra lateral.")
-
-    st.divider()
-    st.subheader("Mis datos")
-    st.info("Tus datos viven solo en esta sesión del navegador. Si recargas la página se pierden. "
-            "Descarga una copia para guardarlos y restáuralos cuando quieras. La copia no incluye datos bancarios.")
-    mostrar_msg("datos")
-    copia = kl.exportar_estado(ss.movimientos, ss.metas, ss.prefs, ss.progreso)
-    st.download_button("Descargar mi copia de seguridad", copia, file_name="kiki_pay_respaldo.json",
-                       mime="application/json", key="dl_respaldo")
-    st.file_uploader("Restaurar una copia de seguridad (.json)", type=["json"], key="w_respaldo")
-    existe = hay_datos()
-    if existe:
-        st.checkbox("Entiendo que se reemplazarán mis datos actuales", key="conf_restaurar")
-    st.button("Restaurar copia", key="btn_restaurar", on_click=cb_restaurar,
-              disabled=existe and not ss.get("conf_restaurar", False))
-    st.subheader("Ejemplo ficticio")
-    if existe:
-        st.checkbox("Entiendo que se reemplazarán mis datos actuales", key="conf_demo")
-    st.button("Cargar datos de ejemplo", key="btn_demo", on_click=cb_cargar_demo,
-              disabled=existe and not ss.get("conf_demo", False))
-    st.subheader("Empezar de cero")
-    st.checkbox("Quiero borrar todos mis datos de práctica", key="conf_borrar")
-    st.button("Borrar mis datos", key="btn_borrar_todo", on_click=cb_borrar_todo,
-              disabled=not ss.get("conf_borrar", False))
-
-
-PAGINAS = {
-    "inicio": pagina_inicio, "dinero": pagina_dinero, "compras": pagina_compras,
-    "organizo": pagina_organizo, "ahorro": pagina_ahorro, "retos": pagina_retos,
-    "kiki": pagina_kiki, "progreso": pagina_progreso, "experiencia": pagina_experiencia,
+# ---------------------------------------------------------------
+# Retos: de muy fáciles a difíciles
+# ---------------------------------------------------------------
+NIVELES = {
+    1: ("🌱", "Muy fácil", "#43A047", "#E3F6E4"),
+    2: ("🌿", "Fácil", "#00ACC1", "#DDF5F9"),
+    3: ("🌳", "Medio", "#FB8C00", "#FFEFD9"),
+    4: ("🌟", "Difícil", "#E53935", "#FFE3E2"),
+    5: ("🏆", "Experto", "#8E24AA", "#F3E1F8"),
 }
 
+RETOS = [
+    # Nivel 1
+    {"nivel": 1, "q": "¿Cuánto vale una moneda de $10?",
+     "op": ["$5", "$10", "$20"], "ok": "$10",
+     "exp": "La moneda dice 10, así que vale $10."},
+    {"nivel": 1, "q": "¿Cuál de estas cosas sirve para pagar?",
+     "op": ["Una nube", "Dinero", "Un lápiz"], "ok": "Dinero",
+     "exp": "El dinero sirve para pagar lo que compramos."},
+    {"nivel": 1, "q": "Tienes 2 monedas de $5. ¿Cuánto dinero tienes?",
+     "op": ["$10", "$7", "$25"], "ok": "$10",
+     "exp": "5 + 5 = 10. Tienes $10."},
+    # Nivel 2
+    {"nivel": 2, "q": "Tienes $50 y compras algo que cuesta $30. ¿Cuánto queda?",
+     "op": ["$10", "$20", "$30"], "ok": "$20",
+     "exp": "50 - 30 = 20. Quedan $20."},
+    {"nivel": 2, "q": "¿Cuál puede ser una necesidad básica?",
+     "op": ["Videojuego", "Juguete", "Agua"], "ok": "Agua",
+     "exp": "El agua es necesaria para vivir."},
+    {"nivel": 2, "q": "Una manzana cuesta $12 y pagas con un billete de $20. ¿Cuánto es tu cambio?",
+     "op": ["$8", "$12", "$10"], "ok": "$8",
+     "exp": "20 - 12 = 8. Tu cambio es de $8."},
+    # Nivel 3
+    {"nivel": 3, "q": "Un producto cuesta $15. ¿Qué billete puede cubrir el precio?",
+     "op": ["$10", "$5", "$20"], "ok": "$20",
+     "exp": "Con $20 pagas $15 y recibes $5 de cambio."},
+    {"nivel": 3, "q": "Quieres ahorrar para una mochila. ¿Qué puede ayudarte?",
+     "op": ["Gastar todo hoy", "Guardar una parte", "No revisar el precio"],
+     "ok": "Guardar una parte",
+     "exp": "Guardar poco a poco ayuda a alcanzar una meta."},
+    {"nivel": 3, "q": "Compras un pan de $18 y una leche de $24. ¿Cuánto pagas en total?",
+     "op": ["$32", "$42", "$52"], "ok": "$42",
+     "exp": "18 + 24 = 42. En total pagas $42."},
+    # Nivel 4
+    {"nivel": 4, "q": "Compras un jabón de $16 y un pan de $18. Pagas con $50. ¿Cuánto es tu cambio?",
+     "op": ["$16", "$34", "$26"], "ok": "$16",
+     "exp": "Primero suma: 16 + 18 = 34. Luego resta: 50 - 34 = 16."},
+    {"nivel": 4, "q": "Tu meta de ahorro es $300 y llevas $120. ¿Cuánto te falta?",
+     "op": ["$120", "$180", "$420"], "ok": "$180",
+     "exp": "300 - 120 = 180. Te faltan $180."},
+    {"nivel": 4, "q": "Este mes recibiste $200 y gastaste $35. ¿Cuánto es la diferencia?",
+     "op": ["$235", "$165", "$35"], "ok": "$165",
+     "exp": "200 - 35 = 165. La diferencia es de $165."},
+    # Nivel 5
+    {"nivel": 5, "q": "Tu meta es ahorrar $500 y llevas $125. ¿Qué porcentaje llevas?",
+     "op": ["10%", "25%", "50%"], "ok": "25%",
+     "exp": "125 es la cuarta parte de 500, es decir, el 25%."},
+    {"nivel": 5, "q": "¿Cuál de estas opciones es un deseo, no una necesidad?",
+     "op": ["Comida del día", "Medicina", "Un videojuego nuevo"], "ok": "Un videojuego nuevo",
+     "exp": "Un deseo es algo que te gustaría tener, pero puede esperar."},
+    {"nivel": 5, "q": "Tienes $100. Compras un cuaderno de $35 y unos colores de $42. ¿Te alcanza para un jabón de $16?",
+     "op": ["Sí, y me quedan $7", "No, me faltan $7", "Sí, y me quedan $23"],
+     "ok": "Sí, y me quedan $7",
+     "exp": "35 + 42 = 77. Te quedan 100 - 77 = 23. Con 23 pagas el jabón de 16 y sobran $7."},
+    {"nivel": 5, "q": "Ahorras $25 cada semana. ¿En cuántas semanas llegas a $100?",
+     "op": ["3 semanas", "4 semanas", "5 semanas"], "ok": "4 semanas",
+     "exp": "25 por 4 semanas es 100. Son 4 semanas."},
+]
 
-def main():
-    init_estado()
-    st.markdown(construir_css(st.session_state.prefs), unsafe_allow_html=True)
-    barra_lateral()
-    PAGINAS.get(st.session_state.seccion, pagina_inicio)()
+
+def responder(opcion):
+    i = st.session_state.reto_i
+    st.session_state.reto_intentos += 1
+    n = st.session_state.reto_intentos
+    if opcion == RETOS[i]["ok"]:
+        st.session_state.reto_estrellas[i] = 3 if n == 1 else 2 if n == 2 else 1
+        st.session_state.reto_puntos += (10 if n == 1 else 5 if n == 2 else 2) * RETOS[i]["nivel"]
+        st.session_state.reto_feedback = "ok"
+    else:
+        st.session_state.reto_feedback = "fail"
+
+
+def siguiente_reto():
+    st.session_state.reto_i += 1
+    st.session_state.reto_intentos = 0
+    st.session_state.reto_feedback = None
+
+
+def reto_map(i_actual, estrellas):
+    """Mapa de niveles: camino sinuoso con círculos numerados, estrellas y corona final."""
+    import random
+    n = len(RETOS)
+    xs = [150, 380, 620, 850]
+    ys = [585, 445, 305, 175]
+    pos = []
+    for k in range(n):
+        row, col = divmod(k, 4)
+        x = xs[col] if row % 2 == 0 else xs[3 - col]
+        pos.append((x, ys[row]))
+    crown = (150, 60)
+
+    def seg(a, b):
+        (x1, y1), (x2, y2) = a, b
+        if y1 == y2 or x1 == x2:
+            return f"M{x1} {y1} L{x2} {y2}"
+        bulge = 110 if x1 > 500 else -110
+        return f"M{x1} {y1} C{x1 + bulge} {y1 - 10} {x2 + bulge} {y2 + 10} {x2} {y2}"
+
+    rnd = random.Random(7)
+    sprinkles = ""
+    colors = ["#FF4D8D", "#7C4DFF", "#00B894", "#FFB300", "#29B6F6", "#FF7043"]
+    for _ in range(45):
+        sx, sy = rnd.randint(30, 970), rnd.randint(30, 630)
+        sprinkles += (f'<rect x="{sx}" y="{sy}" width="14" height="6" rx="3" fill="{rnd.choice(colors)}" '
+                      f'opacity=".55" transform="rotate({rnd.randint(0, 180)} {sx} {sy})"/>')
+
+    deco = [("🍭", 55, 545, 54), ("🍬", 500, 520, 46), ("🍩", 260, 380, 50), ("🍬", 740, 380, 46),
+            ("🍭", 940, 380, 54), ("🧁", 500, 245, 50), ("🍪", 250, 245, 44), ("🍓", 750, 245, 44),
+            ("🍒", 640, 75, 48), ("🍩", 780, 85, 48), ("🏰", 930, 100, 60), ("🍭", 60, 330, 50)]
+    deco_svg = "".join(f'<text x="{x}" y="{y}" font-size="{s}" text-anchor="middle" opacity=".9">{e}</text>'
+                       for e, x, y, s in deco)
+
+    paths = ""
+    for k in range(n):
+        a = pos[k]
+        b = pos[k + 1] if k + 1 < n else crown
+        d = seg(a, b)
+        hecho = k < i_actual
+        stripe = "#2ECC71" if hecho else "#F48FB1"
+        paths += (f'<path d="{d}" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>'
+                  f'<path d="{d}" fill="none" stroke="{stripe}" stroke-width="30" stroke-dasharray="16 16"/>')
+
+    nodes = ""
+    for k, (x, y) in enumerate(pos):
+        lvl = RETOS[k]["nivel"]
+        color = NIVELES[lvl][2]
+        nombre = NIVELES[lvl][1]
+        if k < i_actual:
+            got = estrellas.get(k, 0)
+            stars = "".join(
+                f'<text x="{x + dx}" y="{y + 72}" font-size="28" text-anchor="middle" '
+                f'fill="{"#FFC107" if idx < got else "#E0E0E0"}" stroke="#fff" stroke-width="1">★</text>'
+                for idx, dx in enumerate((-26, 0, 26)))
+            nodes += (f'<g><title>Reto {k + 1}: {nombre}</title>'
+                      f'<circle cx="{x}" cy="{y}" r="42" fill="{color}" stroke="#FFD54F" stroke-width="8"/>'
+                      f'<text x="{x}" y="{y}" dy=".35em" font-size="34" font-weight="800" text-anchor="middle" '
+                      f'fill="#fff" stroke="rgba(0,0,0,.35)" stroke-width="4" paint-order="stroke">{k + 1}</text>'
+                      f'<text x="{x}" y="{y - 48}" font-size="30" text-anchor="middle">👑</text>{stars}</g>')
+        elif k == i_actual:
+            nodes += (f'<g><title>Reto {k + 1}: estás aquí</title>'
+                      f'<circle cx="{x}" cy="{y}" r="46" fill="none" stroke="#FFD600" stroke-width="6">'
+                      f'<animate attributeName="r" values="46;66;46" dur="1.4s" repeatCount="indefinite"/>'
+                      f'<animate attributeName="opacity" values="1;0;1" dur="1.4s" repeatCount="indefinite"/></circle>'
+                      f'<circle cx="{x}" cy="{y}" r="46" fill="{color}" stroke="#FFFFFF" stroke-width="9"/>'
+                      f'<text x="{x}" y="{y}" dy=".35em" font-size="40" font-weight="800" text-anchor="middle" '
+                      f'fill="#fff" stroke="rgba(0,0,0,.35)" stroke-width="4" paint-order="stroke">{k + 1}</text>'
+                      f'<g><animateTransform attributeName="transform" type="translate" '
+                      f'values="0 0;0 -12;0 0" dur="0.9s" repeatCount="indefinite"/>'
+                      f'<text x="{x}" y="{y - 58}" font-size="44" text-anchor="middle">🦄</text></g></g>')
+        else:
+            nodes += (f'<g><title>Reto {k + 1}: todavía bloqueado</title>'
+                      f'<circle cx="{x}" cy="{y}" r="40" fill="#B0BEC5" stroke="#FFFFFF" stroke-width="7"/>'
+                      f'<text x="{x}" y="{y}" dy=".35em" font-size="32" font-weight="800" text-anchor="middle" '
+                      f'fill="#ECEFF1" stroke="rgba(0,0,0,.25)" stroke-width="3" paint-order="stroke">{k + 1}</text>'
+                      f'<text x="{x}" y="{y + 66}" font-size="22" text-anchor="middle">🔒</text></g>')
+
+    fin = i_actual >= n
+    glow = ('<circle cx="150" cy="55" r="58" fill="#FFF176" opacity=".8">'
+            '<animate attributeName="r" values="50;70;50" dur="1.2s" repeatCount="indefinite"/></circle>') if fin else ""
+    html = f"""
+<style>body{{margin:0;background:transparent}}
+svg{{width:100%;height:auto;display:block;max-width:1100px;margin:0 auto;
+font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji','Segoe UI',Arial,sans-serif}}</style>
+<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mapa de retos">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#FFF59D"/><stop offset=".3" stop-color="#C8F2A5"/>
+<stop offset=".65" stop-color="#FFC4E3"/><stop offset="1" stop-color="#D5C2FF"/></linearGradient></defs>
+<rect x="5" y="5" width="990" height="650" rx="26" fill="url(#bg)" stroke="#D81B60" stroke-width="10"/>
+{sprinkles}{deco_svg}{paths}
+{glow}<text x="150" y="75" font-size="76" text-anchor="middle">👑</text>
+<text x="330" y="90" font-size="58" font-weight="900" font-style="italic" fill="#E53935" stroke="#FFFFFF"
+stroke-width="8" paint-order="stroke" text-anchor="start">¡LA META!</text>
+{nodes}
+</svg>
+"""
+    components.html(html, height=740)
+
+
+def reiniciar_retos():
+    st.session_state.reto_i = 0
+    st.session_state.reto_intentos = 0
+    st.session_state.reto_feedback = None
+    st.session_state.reto_estrellas = {}
+    st.session_state.reto_puntos = 0
+    st.session_state.reto_celebrado = False
+
+
+# ---------------------------------------------------------------
+# Encabezado
+# ---------------------------------------------------------------
+st.markdown("""
+<div class="finania-hero">
+<h1>🌈 FinanIA Inclusivo</h1>
+<h3>Aprender sobre el dinero, paso a paso y a tu propio ritmo.</h3>
+<p>Explora, practica y vuelve a intentar cuando lo necesites. No hay prisa.</p>
+</div>
+""", unsafe_allow_html=True)
+speak_button("Bienvenido a FinanIA Inclusivo. Aprende sobre el dinero, paso a paso y a tu propio ritmo. "
+             "Explora, practica y vuelve a intentar cuando lo necesites. No hay prisa.",
+             label="Escuchar bienvenida")
+
+st.sidebar.title("🌈 FinanIA Inclusivo")
+st.sidebar.caption("Tu espacio para aprender sobre el dinero")
+if st.session_state.nombre.strip():
+    st.sidebar.write(f"¡Hola, {st.session_state.nombre.strip()}!")
+
+section = st.sidebar.radio("Elige una sección:", [
+    "🏠 Inicio", "🪙 Conozco el dinero", "🛍️ Practico compras",
+    "📊 Organizo mi dinero", "🌱 Mi ahorro", "🎮 Retos y juegos",
+    "💬 Ayuda FinanIA", "⚙️ Mi experiencia"
+])
+
+# Modo demostración: carga datos ficticios para una presentación.
+st.sidebar.divider()
+demo_choice = st.sidebar.toggle("Cargar ejemplo de demostración", value=False)
+if demo_choice and not st.session_state.modo_demo:
+    st.session_state.movimientos = [
+        {"Fecha": str(date.today()), "Tipo": "Ingreso", "Concepto": "Dinero de práctica",
+         "Categoría": "Otro", "Cantidad": 200.0},
+        {"Fecha": str(date.today()), "Tipo": "Gasto", "Concepto": "Cuaderno",
+         "Categoría": "Educación", "Cantidad": 35.0},
+    ]
+    st.session_state.ahorro_actual = 120.0
+    st.session_state.meta_ahorro = 300.0
+    st.session_state.modo_demo = True
+elif not demo_choice and st.session_state.modo_demo:
+    st.session_state.movimientos = []
+    st.session_state.ahorro_actual = 0.0
+    st.session_state.meta_ahorro = 500.0
+    st.session_state.modo_demo = False
+
+st.sidebar.caption("Los ejemplos son ficticios. Puedes desactivar el modo para empezar en blanco.")
+
+# ---------------------------------------------------------------
+# Secciones
+# ---------------------------------------------------------------
+if section == "🏠 Inicio":
+    header("¡Bienvenido/a!", "Bienvenido. Elige una actividad. Puedes comenzar por cualquiera y avanzar a tu ritmo.")
+    st.write("Elige una actividad. Puedes comenzar por cualquiera y avanzar a tu ritmo.")
+    inc, exp, balance = totals()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("💰 Saldo de práctica", money(balance))
+    c2.metric("🌱 Ahorro registrado", money(st.session_state.ahorro_actual))
+    c3.metric("🎯 Meta de ahorro", money(st.session_state.meta_ahorro))
+    speak_button(
+        f"Tu saldo de práctica es {money(balance)}. Tu ahorro registrado es {money(st.session_state.ahorro_actual)}. "
+        f"Tu meta de ahorro es {money(st.session_state.meta_ahorro)}.", label="Escuchar mis datos")
+    subheader("Explora los módulos")
+    cards = [
+        ("🪙", "Conocer el dinero", "Reconocer cantidades y practicar sumas.", "#FF6B9D", "#FFE3EE"),
+        ("🛍️", "Practicar compras", "Elegir productos y calcular el cambio.", "#FF9800", "#FFEFD6"),
+        ("📊", "Organizar mi dinero", "Registrar ingresos y gastos.", "#00B894", "#DDF8EF"),
+        ("🌱", "Ahorrar", "Crear una meta y observar el progreso.", "#43A047", "#E3F6E4"),
+        ("🎮", "Retos y juegos", "Resolver situaciones cotidianas, de fácil a difícil.", "#7C4DFF", "#EAE3FF"),
+        ("💬", "Ayuda FinanIA", "Consultar explicaciones sencillas.", "#00ACC1", "#DDF5F9"),
+    ]
+    cols = st.columns(3)
+    for i, (icon, title, desc, accent, bg) in enumerate(cards):
+        with cols[i % 3]:
+            card(icon, title, desc, accent, bg)
+    msg("success", "Puedes repetir las actividades todas las veces que quieras.")
+
+elif section == "🪙 Conozco el dinero":
+    header("🪙 Conozco el dinero")
+    hint("Observa la tarjeta, elige la cantidad y presiona Comprobar.")
+    examples = {
+        "Una moneda de $5": 5, "Dos monedas de $10": 20,
+        "Un billete de $20": 20, "Un billete de $50": 50,
+        "Cinco monedas de $10": 50
+    }
+    prompt("Observa esta representación:")
+    item = st.selectbox("Representación", list(examples.keys()), label_visibility="collapsed")
+    subheader("💵 " + item, item)
+    prompt("¿Cuánto dinero representa?")
+    answer = st.radio("Cantidad", [5, 10, 20, 30, 50, 100], horizontal=True,
+                      key="money_answer", label_visibility="collapsed")
+    if st.button("Comprobar cantidad", key="check_money"):
+        if answer == examples[item]:
+            msg("success", "¡Correcto! Identificaste la cantidad. 🎉")
+        else:
+            msg("warning", "Vuelve a mirar la representación e inténtalo otra vez.")
     st.divider()
-    st.caption("Kiki Pay es una herramienta educativa con datos de práctica. No realiza operaciones financieras reales.")
+    subheader("➕ Practica una suma", "Practica una suma. Elige dos cantidades y escribe el total.")
+    a, b = st.columns(2)
+    with a:
+        first = st.selectbox("Primera cantidad", [1, 2, 5, 10, 20], key="sum_first")
+    with b:
+        second = st.selectbox("Segunda cantidad", [1, 2, 5, 10, 20], key="sum_second")
+    prompt(f"¿Cuánto es {first} más {second}?", f"¿Cuánto es {first} más {second}? Escribe el total.")
+    result = st.number_input("Escribe el total", min_value=0, max_value=100, step=1, key="sum_result")
+    if st.button("Revisar suma", key="check_sum"):
+        if result == first + second:
+            msg("success", f"¡Muy bien! {first} + {second} = {first + second}.")
+        else:
+            msg("info", f"Pista: empieza con {first} y agrega {second}.")
 
+elif section == "🛍️ Practico compras":
+    header("🛍️ Practico compras")
+    hint("Selecciona un producto, revisa el precio y elige cuánto dinero entregas.")
+    products = {"🍎 Manzana": 12, "🥛 Leche": 24, "🍞 Pan": 18,
+                "📒 Cuaderno": 35, "🖍️ Colores": 42, "🧼 Jabón": 16}
+    prompt("¿Qué quieres comprar?")
+    product = st.selectbox("Producto", list(products.keys()), label_visibility="collapsed")
+    price = products[product]
+    st.metric("Precio", money(price))
+    speak_button(f"{product} cuesta {money(price)}.", label="Escuchar precio")
+    prompt("¿Cuánto dinero entregas?")
+    paid = st.selectbox("Dinero entregado", [10, 20, 50, 100, 200], index=2, label_visibility="collapsed")
+    if st.button("Calcular cambio", key="calculate_change"):
+        if paid < price:
+            msg("error", f"Te faltan {money(price - paid)}.")
+        else:
+            msg("success", f"Tu cambio sería {money(paid - price)}. ¡Buen trabajo!")
+    st.caption("Simulación educativa: no realiza compras ni pagos reales.")
 
-main()
+elif section == "📊 Organizo mi dinero":
+    header("📊 Organizo mi dinero")
+    hint("Completa los campos y presiona Guardar movimiento. Puedes usar datos ficticios.")
+    with st.form("movement_form", clear_on_submit=True):
+        kind = st.radio("Tipo de movimiento", ["Ingreso", "Gasto"], horizontal=True)
+        concept = st.text_input("Concepto", placeholder="Ej. dinero para transporte")
+        amount = st.number_input("Cantidad en pesos", min_value=0.0, step=1.0)
+        category = st.selectbox("Categoría", [
+            "Alimentación", "Transporte", "Educación", "Hogar",
+            "Diversión", "Salud", "Ahorro", "Otro"
+        ])
+        submitted = st.form_submit_button("Guardar movimiento")
+    if submitted:
+        if amount <= 0:
+            msg("error", "Escribe una cantidad mayor que cero.")
+        else:
+            add_movement(kind, concept.strip(), category, amount)
+            msg("success", "¡Movimiento guardado en esta sesión!")
+    inc, exp, balance = totals()
+    a, b, c = st.columns(3)
+    a.metric("Ingresos", money(inc))
+    b.metric("Gastos", money(exp))
+    c.metric("Diferencia", money(balance))
+    speak_button(f"Tus ingresos son {money(inc)}. Tus gastos son {money(exp)}. "
+                 f"La diferencia es {money(balance)}.", label="Escuchar mis totales")
+    if st.session_state.movimientos:
+        subheader("Mis movimientos")
+        st.dataframe(pd.DataFrame(st.session_state.movimientos), use_container_width=True, hide_index=True)
+        if st.button("Borrar todos los movimientos", key="clear_movements"):
+            st.session_state.movimientos = []
+            st.rerun()
+    else:
+        msg("info", "Todavía no hay movimientos. Agrega uno de práctica para comenzar.")
+
+elif section == "🌱 Mi ahorro":
+    header("🌱 Mi ahorro")
+    hint("Define una meta y registra cuánto llevas ahorrado.")
+    prompt("Mi meta de ahorro (pesos)")
+    goal = st.number_input("Meta", min_value=1.0, value=float(st.session_state.meta_ahorro),
+                           step=10.0, label_visibility="collapsed")
+    prompt("¿Cuánto llevo ahorrado? (pesos)")
+    saved = st.number_input("Ahorrado", min_value=0.0, value=float(st.session_state.ahorro_actual),
+                            step=5.0, label_visibility="collapsed")
+    st.session_state.meta_ahorro = goal
+    st.session_state.ahorro_actual = saved
+    progress = min(saved / goal, 1.0)
+    st.progress(progress)
+    msg("info", f"Avance: **{progress * 100:.0f}%**", f"Llevas un avance de {progress * 100:.0f} por ciento.")
+    remaining = max(goal - saved, 0)
+    if remaining == 0:
+        msg("success", "¡Meta alcanzada! ¡Felicidades! 🎉")
+    else:
+        msg("info", f"Te faltan {money(remaining)} para llegar a tu meta.")
+
+elif section == "🎮 Retos y juegos":
+    header("🎮 Retos y juegos",
+           "Retos y juegos. Empiezan muy fáciles y poco a poco suben de nivel. Tómate tu tiempo.")
+    hint("Lee la pregunta, toca el altavoz si quieres escucharla y elige una respuesta. "
+         "Puedes intentarlo las veces que quieras.")
+
+    total = len(RETOS)
+    i = st.session_state.reto_i
+    estrellas = sum(st.session_state.reto_estrellas.values())
+    nivel_actual = RETOS[min(i, total - 1)]["nivel"]
+
+    # Tablero de puntos
+    st.markdown(f"""
+<div class="score-row">
+  <div class="score" style="background:#FF6B9D">⭐ Estrellas<br><span style="font-size:1.4em">{estrellas} / {total * 3}</span></div>
+  <div class="score" style="background:#7C4DFF">🏅 Puntos<br><span style="font-size:1.4em">{st.session_state.reto_puntos}</span></div>
+  <div class="score" style="background:#00B894">🎯 Reto<br><span style="font-size:1.4em">{min(i + 1, total)} de {total}</span></div>
+</div>
+""", unsafe_allow_html=True)
+
+    # Mapa de niveles
+    reto_map(i, st.session_state.reto_estrellas)
+    if i < total:
+        speak_button(f"Vas en el reto {i + 1} de {total}, del nivel {nivel_actual}. "
+                     f"Llevas {estrellas} estrellas y {st.session_state.reto_puntos} puntos.",
+                     label="Escuchar dónde voy")
+    else:
+        speak_button("Llegaste a la meta. ¡Terminaste todos los retos!", label="Escuchar")
+
+    # Camino de niveles
+    chips = ""
+    for lvl, (icon, name, color, _bg) in NIVELES.items():
+        idxs = [k for k, r in enumerate(RETOS) if r["nivel"] == lvl]
+        done = all(k < i for k in idxs)
+        current = (lvl == nivel_actual and i < total)
+        if done:
+            style, mark = f"background:{color}", "✅"
+        elif current:
+            style, mark = f"background:{color};outline:5px solid #FFD600", "👉"
+        else:
+            style, mark = "background:#B0BEC5", "🔒"
+        chips += f'<div class="chip" style="{style}">{mark} {icon} Nivel {lvl}<br>{name}</div>'
+    st.markdown(f'<div class="path">{chips}</div>', unsafe_allow_html=True)
+    st.progress(min(i / total, 1.0))
+
+    if i >= total:
+        # Pantalla final
+        if not st.session_state.reto_celebrado:
+            st.balloons()
+            st.session_state.reto_celebrado = True
+        msg("success",
+            f"🏆 ¡Terminaste todos los retos! Lograste {estrellas} de {total * 3} estrellas "
+            f"y {st.session_state.reto_puntos} puntos. ¡Felicidades!",
+            f"Terminaste todos los retos. Lograste {estrellas} estrellas de {total * 3} "
+            f"y {st.session_state.reto_puntos} puntos. ¡Felicidades!")
+        st.write("Puedes volver a jugar para conseguir más estrellas. No hay prisa.")
+        st.button("🔄 Jugar otra vez", key="reto_reiniciar", on_click=reiniciar_retos)
+    else:
+        reto = RETOS[i]
+        icon, name, color, bg = NIVELES[reto["nivel"]]
+        q_html = reto["q"].replace("$", "&#36;")
+        txt = "#263238"
+        st.markdown(f"""
+<div class="reto-card" style="background:{bg};border-color:{color};color:{txt}">
+  <div style="font-weight:700;color:{color};margin-bottom:.3rem">{icon} Nivel {reto['nivel']} · {name}</div>
+  <div style="font-size:1.15em;font-weight:600;color:{txt}">{q_html}</div>
+</div>
+""", unsafe_allow_html=True)
+        opciones_voz = ", ".join(reto["op"])
+        speak_button(f"{reto['q']} Las opciones son: {opciones_voz}.", label="Escuchar la pregunta")
+
+        listo = st.session_state.reto_feedback == "ok"
+        cols = st.columns(len(reto["op"]))
+        for j, opt in enumerate(reto["op"]):
+            with cols[j]:
+                st.button(opt.replace("$", "\\$"), key=f"reto_{i}_{j}", use_container_width=True,
+                          disabled=listo, on_click=responder, args=(opt,))
+
+        fb = st.session_state.reto_feedback
+        if fb == "ok":
+            n = st.session_state.reto_estrellas[i]
+            msg("success", f"¡Respuesta correcta! 🌟 {reto['exp']} Ganaste {'⭐' * n}",
+                f"¡Respuesta correcta! {reto['exp']}")
+            st.button("Ver mis resultados 🏆" if i == total - 1 else "Siguiente reto ➡️",
+                      key="reto_siguiente", on_click=siguiente_reto, use_container_width=True)
+        elif fb == "fail":
+            msg("warning", "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"],
+                "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"])
+
+elif section == "💬 Ayuda FinanIA":
+    header("💬 Ayuda FinanIA")
+    st.write("Escribe una pregunta. Esta versión usa explicaciones educativas preparadas; no necesita una API.")
+    question = st.text_input("¿Qué quieres aprender?", placeholder="Ej. ¿Qué significa ahorrar?")
+    if st.button("Ver explicación", key="ask_finania"):
+        q = question.lower().strip()
+        answers = [
+            (["ahorrar", "ahorro"], "Ahorrar significa guardar una parte del dinero para utilizarla después. Puedes elegir una meta y avanzar poco a poco."),
+            (["cambio", "vuelto"], "El cambio es el dinero que recibes cuando entregas más de lo que cuesta un producto. Resta: dinero entregado menos precio."),
+            (["presupuesto", "organizar"], "Un presupuesto es un plan para organizar el dinero que recibes y decidir cómo utilizarlo."),
+            (["necesidad", "deseo"], "Una necesidad es algo importante para vivir o estar bien, como alimentos o agua. Un deseo es algo que te gustaría tener, pero puede esperar."),
+            (["precio", "comparar"], "Para comparar precios, observa cuánto cuesta cada opción y qué cantidad o características ofrece.")
+        ]
+        reply = next((text for words, text in answers if any(word in q for word in words)), None)
+        if reply:
+            msg("success", reply)
+        elif q:
+            msg("info", "Puedo explicar: ahorro, cambio, presupuesto, necesidades, deseos y comparación de precios.")
+        else:
+            msg("warning", "Escribe una pregunta o una palabra sobre el tema.")
+    st.caption("Este asistente básico no es un chatbot generativo y no envía preguntas a internet.")
+
+elif section == "⚙️ Mi experiencia":
+    header("⚙️ Mi experiencia", "Mi experiencia. Adapta la aplicación a tus preferencias.")
+    st.write("Adapta la aplicación a tus preferencias.")
+    st.session_state.nombre = st.text_input("Nombre o apodo (opcional)", value=st.session_state.nombre)
+    st.session_state.tamano_letra = st.select_slider(
+        "Tamaño de letra", options=["Pequeña", "Mediana", "Grande", "Muy grande"],
+        value=st.session_state.tamano_letra
+    )
+    st.session_state.alto_contraste = st.toggle("Activar alto contraste", value=st.session_state.alto_contraste)
+    st.session_state.mostrar_pistas = st.toggle(
+        "Mostrar instrucciones paso a paso", value=st.session_state.mostrar_pistas
+    )
+    st.session_state.mostrar_voz = st.toggle(
+        "Mostrar botones de voz 🔊", value=st.session_state.mostrar_voz
+    )
+    speak_button("Hola, soy tu guía de FinanIA. Estoy aquí para acompañarte a tu ritmo.", label="Probar la voz")
+    msg("success", "Tus preferencias se aplican durante esta sesión.")
+    st.caption("Cada persona tiene preferencias diferentes. Puedes cambiar los ajustes cuando quieras.")
+    st.caption("La voz depende del dispositivo: en Edge, Chrome, Android y iPhone suele haber voces en español de México.")
+
+st.divider()
+st.caption(
+    "FinanIA Inclusivo · Herramienta educativa. No ofrece asesoría financiera, "
+    "no realiza pagos y no diagnostica. Utiliza datos ficticios o de práctica."
+)
