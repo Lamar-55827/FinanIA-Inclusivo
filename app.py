@@ -76,7 +76,7 @@ else:
 
 st.markdown(f"""
 <style>
-/* Ocultar completamente la barra lateral y su botón de despliegue */
+/* Ocultar barra lateral */
 [data-testid="stSidebar"], [data-testid="collapsedControl"] {{
   display: none !important;
 }}
@@ -85,7 +85,7 @@ html, body, [class*="st-"], p, label, li {{ font-size: {font_px}px; }}
 .block-container {{ max-width: 1180px; padding-top: 1.2rem; padding-bottom: 3rem; }}
 .kikipay-hero {{
   background: linear-gradient(120deg,#FF4D8D,#FF8A00,#00B894,#6C5CE7);
-  color:#FFFFFF; padding:1.25rem 1.5rem; border-radius:22px; margin-bottom:.6rem;
+  color:#FFFFFF; padding:1.25rem 1.5rem; border-radius:22px; margin-bottom:.8rem;
   text-shadow: 0 2px 4px rgba(0,0,0,.35); box-shadow: 0 6px 18px rgba(108,92,231,.35);
 }}
 .kikipay-hero h1, .kikipay-hero h3, .kikipay-hero p {{ color:#FFFFFF; margin:.2rem 0; }}
@@ -95,14 +95,28 @@ html, body, [class*="st-"], p, label, li {{ font-size: {font_px}px; }}
   box-shadow: 0 3px 10px rgba(0,0,0,.08);
 }}
 div.stButton > button, div.stFormSubmitButton > button {{
-  min-height: 3rem; border-radius: 16px; font-weight: 700; border: none;
-  background: {btn_bg}; color: {btn_fg}; box-shadow: 0 3px 8px rgba(0,0,0,.18);
+  min-height: 3.4rem;
+  border-radius: 18px;
+  font-weight: 800;
+  border: none;
+  background: {btn_bg};
+  color: {btn_fg};
+  box-shadow: 0 4px 10px rgba(0,0,0,.18);
   transition: transform .15s, filter .15s;
+  padding: 0.55rem 0.8rem;
+  white-space: pre-line !important;
+  line-height: 1.25 !important;
 }}
 div.stButton > button:hover, div.stFormSubmitButton > button:hover {{
   transform: scale(1.03); filter: brightness(1.08);
 }}
-div.stButton > button p {{ color: {btn_fg}; }}
+div.stButton > button p {{
+  color: {btn_fg};
+  font-size: {font_px + 1}px !important;
+  white-space: pre-line !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}}
 .reto-card {{ border-radius:20px; padding:1.1rem 1.3rem; border:4px solid; margin:.5rem 0; }}
 .score-row {{ display:flex; gap:.7rem; flex-wrap:wrap; margin:.3rem 0 .6rem; }}
 .score {{
@@ -119,19 +133,20 @@ div.stButton > button p {{ color: {btn_fg}; }}
 
 
 # ---------------------------------------------------------------
-# Voz mejorada: usa el motor de la ventana principal para evitar
-# bloqueos entre iframes de Streamlit.
+# Voz directa en cada botón (sin setTimeout ni bloqueo cross-origin)
+# con respaldo automático si el navegador no tiene voces locales.
 # ---------------------------------------------------------------
 SPEAK_JS = """
 (function(){
-  const rootWin = (window.parent && window.parent.speechSynthesis) ? window.parent : window;
-  const synth = rootWin.speechSynthesis;
+  const synth = window.speechSynthesis;
+  let audioFallback = null;
 
-  function norm(v){ return (v.lang||'').replace('_','-').toLowerCase(); }
+  function norm(v){ return (v.lang || '').replace('_', '-').toLowerCase(); }
 
-  function pick(){
-    const vs = synth ? synth.getVoices() : [];
-    const prefer = ['dalia','sabina','paulina','mujer','female','google','monica','helena'];
+  function pickVoice(){
+    if (!synth) return null;
+    const vs = synth.getVoices();
+    const prefer = ['dalia','sabina','paulina','monica','helena','google','mujer','female'];
     const byName = list => {
       for (const n of prefer){
         const f = list.find(v => v.name.toLowerCase().includes(n));
@@ -145,51 +160,79 @@ SPEAK_JS = """
     return null;
   }
 
-  function clearAllButtons(){
-    try {
-      const frames = rootWin.document.querySelectorAll('iframe');
-      frames.forEach(fr => {
-        try {
-          fr.contentDocument.querySelectorAll('.b.on').forEach(b => b.classList.remove('on'));
-        } catch(e){}
-      });
-    } catch(e){}
+  if (synth){
+    synth.getVoices();
+    synth.onvoiceschanged = function(){ synth.getVoices(); };
+  }
+
+  function stopAll(btn){
+    if (synth){
+      try { synth.cancel(); } catch(e){}
+    }
+    if (audioFallback){
+      try { audioFallback.pause(); audioFallback.currentTime = 0; } catch(e){}
+      audioFallback = null;
+    }
     document.querySelectorAll('.b.on').forEach(b => b.classList.remove('on'));
   }
 
-  if (synth){
-    synth.getVoices();
-    if (!rootWin.__kikipayVoicesHooked) {
-      rootWin.__kikipayVoicesHooked = true;
-      synth.onvoiceschanged = function(){ synth.getVoices(); };
+  function playFallbackTTS(text, btn){
+    const chunks = text.match(/.{1,180}(\\s|$)/g) || [text];
+    let idx = 0;
+    btn.classList.add('on');
+    function next(){
+      if (idx >= chunks.length){
+        btn.classList.remove('on');
+        return;
+      }
+      const q = encodeURIComponent(chunks[idx].trim());
+      idx++;
+      audioFallback = new Audio('https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl=es-MX&q=' + q);
+      audioFallback.onended = next;
+      audioFallback.onerror = function(){ btn.classList.remove('on'); };
+      audioFallback.play().catch(function(){ btn.classList.remove('on'); });
     }
+    next();
   }
 
   window.hablar = function(text, btn){
-    if (!synth){
-      alert('Tu navegador no permite voz. Prueba con Chrome, Edge o Safari.');
-      return;
+    const yaActivo = btn.classList.contains('on');
+    stopAll(btn);
+    if (yaActivo) return;
+
+    if (synth){
+      try {
+        if (synth.paused) synth.resume();
+        const u = new SpeechSynthesisUtterance(text);
+        const v = pickVoice();
+        if (v){ u.voice = v; u.lang = v.lang; } else { u.lang = 'es-MX'; }
+        u.rate = 0.92;
+        u.pitch = 1.05;
+        u.volume = 1;
+        window.__kikiUtterance = u;
+
+        let inicioConfirmado = false;
+        u.onstart = function(){ inicioConfirmado = true; };
+        u.onend = function(){ btn.classList.remove('on'); window.__kikiUtterance = null; };
+        u.onerror = function(){
+          window.__kikiUtterance = null;
+          playFallbackTTS(text, btn);
+        };
+
+        btn.classList.add('on');
+        synth.speak(u);
+
+        // Si en 450ms el navegador no arrancó la voz local, activar respaldo de audio
+        setTimeout(function(){
+          if (!inicioConfirmado && !synth.speaking){
+            try { synth.cancel(); } catch(e){}
+            playFallbackTTS(text, btn);
+          }
+        }, 450);
+        return;
+      } catch(e){}
     }
-    const estabaSonandoEste = btn.classList.contains('on') && (synth.speaking || synth.pending);
-    synth.cancel();
-    if (synth.paused) { synth.resume(); }
-    clearAllButtons();
-
-    if (estabaSonandoEste) return;
-
-    setTimeout(function(){
-      const u = new rootWin.SpeechSynthesisUtterance(text);
-      const v = pick();
-      if (v){ u.voice = v; u.lang = v.lang; } else { u.lang = 'es-MX'; }
-      u.rate = 0.92;
-      u.pitch = 1.05;
-      u.volume = 1;
-      btn.classList.add('on');
-      rootWin.__kikipayUtterance = u;
-      u.onend = function(){ btn.classList.remove('on'); rootWin.__kikipayUtterance = null; };
-      u.onerror = function(){ btn.classList.remove('on'); rootWin.__kikipayUtterance = null; };
-      synth.speak(u);
-    }, 60);
+    playFallbackTTS(text, btn);
   };
 })();
 """
@@ -198,7 +241,7 @@ BTN_CSS = """
 body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;}
 .b{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;cursor:pointer;
    color:#fff;background:linear-gradient(135deg,#FF4D8D,#7C4DFF);border-radius:999px;
-   min-height:44px;min-width:44px;padding:0 14px;font-size:22px;
+   min-height:46px;min-width:46px;padding:0 15px;font-size:22px;
    box-shadow:0 3px 8px rgba(0,0,0,.25);transition:transform .15s;}
 .b:hover{transform:scale(1.06);}
 .b span{font-size:16px;font-weight:700;}
@@ -227,7 +270,7 @@ def clean_for_speech(text):
 
 
 def speak_button(text, label=None):
-    """Botón de altavoz. Al tocarlo lee el texto con voz cálida en español."""
+    """Botón de altavoz. Al tocarlo lee el texto en español."""
     if not st.session_state.mostrar_voz:
         return
     speech = json.dumps(clean_for_speech(text), ensure_ascii=False).replace("</", "<\\/")
@@ -238,7 +281,7 @@ def speak_button(text, label=None):
         f'onclick="hablar({speech}, this)">{inner}</button>'
         f"<script>{SPEAK_JS}</script>"
     )
-    components.html(html, height=54)
+    components.html(html, height=56)
 
 
 def md_safe(text):
@@ -311,7 +354,7 @@ def interactive_module_card(icon, title, desc, accent, bg, target_section, btn_k
   padding:14px 16px; height:165px; box-sizing:border-box; position:relative;
   box-shadow:0 4px 12px rgba(0,0,0,.10);
 }}
-.ic{{font-size:44px;line-height:1;}}
+.ic{{font-size:46px;line-height:1;}}
 h4{{margin:8px 0 4px;color:{text_color};font-size:{font_px + 2}px;}}
 p{{margin:0;color:{text_color};font-size:{font_px - 1}px;}}
 .sp{{position:absolute;top:10px;right:10px;}}
@@ -528,388 +571,4 @@ font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji','Segoe UI',A
 {sprinkles}{deco_svg}{paths}
 {glow}<text x="150" y="75" font-size="76" text-anchor="middle">👑</text>
 <text x="330" y="90" font-size="58" font-weight="900" font-style="italic" fill="#E53935" stroke="#FFFFFF"
-stroke-width="8" paint-order="stroke" text-anchor="start">¡LA META!</text>
-{nodes}
-</svg>
-"""
-    components.html(html, height=740)
-
-
-def reiniciar_retos():
-    st.session_state.reto_i = 0
-    st.session_state.reto_intentos = 0
-    st.session_state.reto_feedback = None
-    st.session_state.reto_estrellas = {}
-    st.session_state.reto_puntos = 0
-    st.session_state.reto_celebrado = False
-
-
-# ---------------------------------------------------------------
-# Encabezado principal
-# ---------------------------------------------------------------
-saludo_personal = (
-    f"¡Hola, {st.session_state.nombre.strip()}! "
-    if st.session_state.nombre.strip()
-    else ""
-)
-st.markdown(f"""
-<div class="kikipay-hero">
-<h1>🌈 KikiPay Inclusivo</h1>
-<h3>{saludo_personal}Aprender sobre el dinero, paso a paso y a tu propio ritmo.</h3>
-<p>Toca cualquier icono para entrar directo a esa actividad. No hay prisa.</p>
-</div>
-""", unsafe_allow_html=True)
-
-speak_button(
-    f"{saludo_personal}Bienvenido a KikiPay Inclusivo. Aprende sobre el dinero, paso a paso y a tu propio ritmo. "
-    "Toca cualquier icono para entrar directo a esa actividad.",
-    label="Escuchar bienvenida",
-)
-
-# ---------------------------------------------------------------
-# Barra superior de navegación con iconos directos (reemplaza el panel lateral)
-# ---------------------------------------------------------------
-nav_cols = st.columns(len(SECCIONES))
-for idx, (sec_full, icon, short_label) in enumerate(SECCIONES):
-    with nav_cols[idx]:
-        es_actual = st.session_state.seccion_actual == sec_full
-        etiqueta = f"✅ {icon}\n{short_label}" if es_actual else f"{icon}\n{short_label}"
-        st.button(
-            etiqueta,
-            key=f"nav_top_{idx}",
-            use_container_width=True,
-            on_click=ir_a,
-            args=(sec_full,),
-        )
-
-st.divider()
-
-section = st.session_state.seccion_actual
-
-# ---------------------------------------------------------------
-# Secciones
-# ---------------------------------------------------------------
-if section == "🏠 Inicio":
-    header("¡Bienvenido/a!", "Bienvenido. Toca la tarjeta o el icono de la actividad que quieras hacer.")
-    st.write("Toca cualquier tarjeta para comenzar. Puedes volver al inicio cuando quieras.")
-
-    inc, exp, balance = totals()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("💰 Saldo de práctica", money(balance))
-    c2.metric("🌱 Ahorro registrado", money(st.session_state.ahorro_actual))
-    c3.metric("🎯 Meta de ahorro", money(st.session_state.meta_ahorro))
-
-    speak_button(
-        f"Tu saldo de práctica es {money(balance)}. Tu ahorro registrado es {money(st.session_state.ahorro_actual)}. "
-        f"Tu meta de ahorro es {money(st.session_state.meta_ahorro)}.",
-        label="Escuchar mis datos",
-    )
-
-    subheader("Toca un icono para abrir la actividad")
-    cards = [
-        ("🪙", "Conocer el dinero", "Reconocer cantidades y practicar sumas.", "#FF6B9D", "#FFE3EE", "🪙 Conozco el dinero"),
-        ("🛍️", "Practicar compras", "Elegir productos y calcular el cambio.", "#FF9800", "#FFEFD6", "🛍️ Practico compras"),
-        ("📊", "Organizar mi dinero", "Registrar ingresos y gastos.", "#00B894", "#DDF8EF", "📊 Organizo mi dinero"),
-        ("🌱", "Mi ahorro", "Crear una meta y observar el progreso.", "#43A047", "#E3F6E4", "🌱 Mi ahorro"),
-        ("🎮", "Retos y juegos", "Resolver situaciones cotidianas, de fácil a difícil.", "#7C4DFF", "#EAE3FF", "🎮 Retos y juegos"),
-        ("💬", "Ayuda KikiPay", "Consultar explicaciones sencillas.", "#00ACC1", "#DDF5F9", "💬 Ayuda KikiPay"),
-    ]
-    cols = st.columns(3)
-    for idx, (icon, title, desc, accent, bg, target) in enumerate(cards):
-        with cols[idx % 3]:
-            interactive_module_card(icon, title, desc, accent, bg, target, f"card_open_{idx}")
-
-    st.write("")
-    msg("success", "Puedes repetir las actividades todas las veces que quieras.")
-
-elif section == "🪙 Conozco el dinero":
-    header("🪙 Conozco el dinero")
-    hint("Observa la tarjeta, elige la cantidad y presiona Comprobar.")
-    examples = {
-        "Una moneda de $5": 5,
-        "Dos monedas de $10": 20,
-        "Un billete de $20": 20,
-        "Un billete de $50": 50,
-        "Cinco monedas de $10": 50,
-    }
-    prompt("Observa esta representación:")
-    item = st.selectbox("Representación", list(examples.keys()), label_visibility="collapsed")
-    subheader("💵 " + item, item)
-    prompt("¿Cuánto dinero representa?")
-    answer = st.radio(
-        "Cantidad", [5, 10, 20, 30, 50, 100], horizontal=True,
-        key="money_answer", label_visibility="collapsed"
-    )
-    if st.button("Comprobar cantidad", key="check_money"):
-        if answer == examples[item]:
-            msg("success", "¡Correcto! Identificaste la cantidad. 🎉")
-        else:
-            msg("warning", "Vuelve a mirar la representación e inténtalo otra vez.")
-    st.divider()
-    subheader("➕ Practica una suma", "Practica una suma. Elige dos cantidades y escribe el total.")
-    a, b = st.columns(2)
-    with a:
-        first = st.selectbox("Primera cantidad", [1, 2, 5, 10, 20], key="sum_first")
-    with b:
-        second = st.selectbox("Segunda cantidad", [1, 2, 5, 10, 20], key="sum_second")
-    prompt(f"¿Cuánto es {first} más {second}?", f"¿Cuánto es {first} más {second}? Escribe el total.")
-    result = st.number_input("Escribe el total", min_value=0, max_value=100, step=1, key="sum_result")
-    if st.button("Revisar suma", key="check_sum"):
-        if result == first + second:
-            msg("success", f"¡Muy bien! {first} + {second} = {first + second}.")
-        else:
-            msg("info", f"Pista: empieza con {first} y agrega {second}.")
-
-elif section == "🛍️ Practico compras":
-    header("🛍️ Practico compras")
-    hint("Selecciona un producto, revisa el precio y elige cuánto dinero entregas.")
-    products = {
-        "🍎 Manzana": 12, "🥛 Leche": 24, "🍞 Pan": 18,
-        "📒 Cuaderno": 35, "🖍️ Colores": 42, "🧼 Jabón": 16,
-    }
-    prompt("¿Qué quieres comprar?")
-    product = st.selectbox("Producto", list(products.keys()), label_visibility="collapsed")
-    price = products[product]
-    st.metric("Precio", money(price))
-    speak_button(f"{product} cuesta {money(price)}.", label="Escuchar precio")
-    prompt("¿Cuánto dinero entregas?")
-    paid = st.selectbox("Dinero entregado", [10, 20, 50, 100, 200], index=2, label_visibility="collapsed")
-    if st.button("Calcular cambio", key="calculate_change"):
-        if paid < price:
-            msg("error", f"Te faltan {money(price - paid)}.")
-        else:
-            msg("success", f"Tu cambio sería {money(paid - price)}. ¡Buen trabajo!")
-    st.caption("Simulación educativa: no realiza compras ni pagos reales.")
-
-elif section == "📊 Organizo mi dinero":
-    header("📊 Organizo mi dinero")
-    hint("Completa los campos y presiona Guardar movimiento. Puedes usar datos ficticios.")
-    with st.form("movement_form", clear_on_submit=True):
-        kind = st.radio("Tipo de movimiento", ["Ingreso", "Gasto"], horizontal=True)
-        concept = st.text_input("Concepto", placeholder="Ej. dinero para transporte")
-        amount = st.number_input("Cantidad en pesos", min_value=0.0, step=1.0)
-        category = st.selectbox("Categoría", [
-            "Alimentación", "Transporte", "Educación", "Hogar",
-            "Diversión", "Salud", "Ahorro", "Otro",
-        ])
-        submitted = st.form_submit_button("Guardar movimiento")
-    if submitted:
-        if amount <= 0:
-            msg("error", "Escribe una cantidad mayor que cero.")
-        else:
-            add_movement(kind, concept.strip(), category, amount)
-            msg("success", "¡Movimiento guardado en esta sesión!")
-    inc, exp, balance = totals()
-    a, b, c = st.columns(3)
-    a.metric("Ingresos", money(inc))
-    b.metric("Gastos", money(exp))
-    c.metric("Diferencia", money(balance))
-    speak_button(
-        f"Tus ingresos son {money(inc)}. Tus gastos son {money(exp)}. "
-        f"La diferencia es {money(balance)}.",
-        label="Escuchar mis totales",
-    )
-    if st.session_state.movimientos:
-        subheader("Mis movimientos")
-        st.dataframe(pd.DataFrame(st.session_state.movimientos), use_container_width=True, hide_index=True)
-        if st.button("Borrar todos los movimientos", key="clear_movements"):
-            st.session_state.movimientos = []
-            st.rerun()
-    else:
-        msg("info", "Todavía no hay movimientos. Agrega uno de práctica para comenzar.")
-
-elif section == "🌱 Mi ahorro":
-    header("🌱 Mi ahorro")
-    hint("Define una meta y registra cuánto llevas ahorrado.")
-    prompt("Mi meta de ahorro (pesos)")
-    goal = st.number_input(
-        "Meta", min_value=1.0, value=float(st.session_state.meta_ahorro),
-        step=10.0, label_visibility="collapsed"
-    )
-    prompt("¿Cuánto llevo ahorrado? (pesos)")
-    saved = st.number_input(
-        "Ahorrado", min_value=0.0, value=float(st.session_state.ahorro_actual),
-        step=5.0, label_visibility="collapsed"
-    )
-    st.session_state.meta_ahorro = goal
-    st.session_state.ahorro_actual = saved
-    progress = min(saved / goal, 1.0)
-    st.progress(progress)
-    msg("info", f"Avance: **{progress * 100:.0f}%**", f"Llevas un avance de {progress * 100:.0f} por ciento.")
-    remaining = max(goal - saved, 0)
-    if remaining == 0:
-        msg("success", "¡Meta alcanzada! ¡Felicidades! 🎉")
-    else:
-        msg("info", f"Te faltan {money(remaining)} para llegar a tu meta.")
-
-elif section == "🎮 Retos y juegos":
-    header(
-        "🎮 Retos y juegos",
-        "Retos y juegos. Empiezan muy fáciles y poco a poco suben de nivel. Tómate tu tiempo.",
-    )
-    hint(
-        "Lee la pregunta, toca el altavoz si quieres escucharla y elige una respuesta. "
-        "Puedes intentarlo las veces que quieras."
-    )
-
-    total = len(RETOS)
-    i = st.session_state.reto_i
-    estrellas = sum(st.session_state.reto_estrellas.values())
-    nivel_actual = RETOS[min(i, total - 1)]["nivel"]
-
-    st.markdown(f"""
-<div class="score-row">
-  <div class="score" style="background:#FF6B9D">⭐ Estrellas<br><span style="font-size:1.4em">{estrellas} / {total * 3}</span></div>
-  <div class="score" style="background:#7C4DFF">🏅 Puntos<br><span style="font-size:1.4em">{st.session_state.reto_puntos}</span></div>
-  <div class="score" style="background:#00B894">🎯 Reto<br><span style="font-size:1.4em">{min(i + 1, total)} de {total}</span></div>
-</div>
-""", unsafe_allow_html=True)
-
-    reto_map(i, st.session_state.reto_estrellas)
-    if i < total:
-        speak_button(
-            f"Vas en el reto {i + 1} de {total}, del nivel {nivel_actual}. "
-            f"Llevas {estrellas} estrellas y {st.session_state.reto_puntos} puntos.",
-            label="Escuchar dónde voy",
-        )
-    else:
-        speak_button("Llegaste a la meta. ¡Terminaste todos los retos!", label="Escuchar")
-
-    chips = ""
-    for lvl, (icon, name, color, _bg) in NIVELES.items():
-        idxs = [k for k, r in enumerate(RETOS) if r["nivel"] == lvl]
-        done = all(k < i for k in idxs)
-        current = (lvl == nivel_actual and i < total)
-        if done:
-            style, mark = f"background:{color}", "✅"
-        elif current:
-            style, mark = f"background:{color};outline:5px solid #FFD600", "👉"
-        else:
-            style, mark = "background:#B0BEC5", "🔒"
-        chips += f'<div class="chip" style="{style}">{mark} {icon} Nivel {lvl}<br>{name}</div>'
-    st.markdown(f'<div class="path">{chips}</div>', unsafe_allow_html=True)
-    st.progress(min(i / total, 1.0))
-
-    if i >= total:
-        if not st.session_state.reto_celebrado:
-            st.balloons()
-            st.session_state.reto_celebrado = True
-        msg(
-            "success",
-            f"🏆 ¡Terminaste todos los retos! Lograste {estrellas} de {total * 3} estrellas "
-            f"y {st.session_state.reto_puntos} puntos. ¡Felicidades!",
-            f"Terminaste todos los retos. Lograste {estrellas} estrellas de {total * 3} "
-            f"y {st.session_state.reto_puntos} puntos. ¡Felicidades!",
-        )
-        st.write("Puedes volver a jugar para conseguir más estrellas. No hay prisa.")
-        st.button("🔄 Jugar otra vez", key="reto_reiniciar", on_click=reiniciar_retos)
-    else:
-        reto = RETOS[i]
-        icon, name, color, bg = NIVELES[reto["nivel"]]
-        q_html = reto["q"].replace("$", "&#36;")
-        txt = "#263238"
-        st.markdown(f"""
-<div class="reto-card" style="background:{bg};border-color:{color};color:{txt}">
-  <div style="font-weight:700;color:{color};margin-bottom:.3rem">{icon} Nivel {reto['nivel']} · {name}</div>
-  <div style="font-size:1.15em;font-weight:600;color:{txt}">{q_html}</div>
-</div>
-""", unsafe_allow_html=True)
-        opciones_voz = ", ".join(reto["op"])
-        speak_button(f"{reto['q']} Las opciones son: {opciones_voz}.", label="Escuchar la pregunta")
-
-        listo = st.session_state.reto_feedback == "ok"
-        cols = st.columns(len(reto["op"]))
-        for j, opt in enumerate(reto["op"]):
-            with cols[j]:
-                st.button(
-                    opt.replace("$", "\\$"), key=f"reto_{i}_{j}", use_container_width=True,
-                    disabled=listo, on_click=responder, args=(opt,),
-                )
-
-        fb = st.session_state.reto_feedback
-        if fb == "ok":
-            n = st.session_state.reto_estrellas[i]
-            msg(
-                "success",
-                f"¡Respuesta correcta! 🌟 {reto['exp']} Ganaste {'⭐' * n}",
-                f"¡Respuesta correcta! {reto['exp']}",
-            )
-            st.button(
-                "Ver mis resultados 🏆" if i == total - 1 else "Siguiente reto ➡️",
-                key="reto_siguiente", on_click=siguiente_reto, use_container_width=True,
-            )
-        elif fb == "fail":
-            msg(
-                "warning",
-                "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"],
-                "Casi. Puedes volver a intentarlo. Pista: " + reto["exp"],
-            )
-
-elif section == "💬 Ayuda KikiPay":
-    header("💬 Ayuda KikiPay")
-    st.write("Escribe una pregunta. Esta versión usa explicaciones educativas preparadas; no necesita una API.")
-    question = st.text_input("¿Qué quieres aprender?", placeholder="Ej. ¿Qué significa ahorrar?")
-    if st.button("Ver explicación", key="ask_kikipay"):
-        q = question.lower().strip()
-        answers = [
-            (["ahorrar", "ahorro"], "Ahorrar significa guardar una parte del dinero para utilizarla después. Puedes elegir una meta y avanzar poco a poco."),
-            (["cambio", "vuelto"], "El cambio es el dinero que recibes cuando entregas más de lo que cuesta un producto. Resta: dinero entregado menos precio."),
-            (["presupuesto", "organizar"], "Un presupuesto es un plan para organizar el dinero que recibes y decidir cómo utilizarlo."),
-            (["necesidad", "deseo"], "Una necesidad es algo importante para vivir o estar bien, como alimentos o agua. Un deseo es algo que te gustaría tener, pero puede esperar."),
-            (["precio", "comparar"], "Para comparar precios, observa cuánto cuesta cada opción y qué cantidad o características ofrece."),
-        ]
-        reply = next((text for words, text in answers if any(word in q for word in words)), None)
-        if reply:
-            msg("success", reply)
-        elif q:
-            msg("info", "Puedo explicar: ahorro, cambio, presupuesto, necesidades, deseos y comparación de precios.")
-        else:
-            msg("warning", "Escribe una pregunta o una palabra sobre el tema.")
-    st.caption("Este asistente básico no es un chatbot generativo y no envía preguntas a internet.")
-
-elif section == "⚙️ Mi experiencia":
-    header("⚙️ Mi experiencia", "Mi experiencia. Adapta la aplicación a tus preferencias.")
-    st.write("Adapta la aplicación a tus preferencias.")
-    st.session_state.nombre = st.text_input("Nombre o apodo (opcional)", value=st.session_state.nombre)
-    st.session_state.tamano_letra = st.select_slider(
-        "Tamaño de letra", options=["Pequeña", "Mediana", "Grande", "Muy grande"],
-        value=st.session_state.tamano_letra,
-    )
-    st.session_state.alto_contraste = st.toggle("Activar alto contraste", value=st.session_state.alto_contraste)
-    st.session_state.mostrar_pistas = st.toggle(
-        "Mostrar instrucciones paso a paso", value=st.session_state.mostrar_pistas
-    )
-    st.session_state.mostrar_voz = st.toggle(
-        "Mostrar botones de voz 🔊", value=st.session_state.mostrar_voz
-    )
-
-    st.divider()
-    subheader("Datos de demostración", "Datos de demostración para practicar con ejemplos.")
-    demo_choice = st.toggle("Cargar ejemplo de demostración", value=st.session_state.modo_demo)
-    if demo_choice and not st.session_state.modo_demo:
-        st.session_state.movimientos = [
-            {"Fecha": str(date.today()), "Tipo": "Ingreso", "Concepto": "Dinero de práctica",
-             "Categoría": "Otro", "Cantidad": 200.0},
-            {"Fecha": str(date.today()), "Tipo": "Gasto", "Concepto": "Cuaderno",
-             "Categoría": "Educación", "Cantidad": 35.0},
-        ]
-        st.session_state.ahorro_actual = 120.0
-        st.session_state.meta_ahorro = 300.0
-        st.session_state.modo_demo = True
-        st.rerun()
-    elif not demo_choice and st.session_state.modo_demo:
-        st.session_state.movimientos = []
-        st.session_state.ahorro_actual = 0.0
-        st.session_state.meta_ahorro = 500.0
-        st.session_state.modo_demo = False
-        st.rerun()
-
-    speak_button("Hola, soy tu guía de KikiPay. Estoy aquí para acompañarte a tu ritmo.", label="Probar la voz")
-    msg("success", "Tus preferencias se aplican durante esta sesión.")
-    st.caption("La voz depende del dispositivo: en Edge, Chrome, Android y iPhone suele haber voces en español de México.")
-
-st.divider()
-st.caption(
-    "KikiPay Inclusivo · Herramienta educativa. No ofrece asesoría financiera, "
-    "no realiza pagos y no diagnostica. Utiliza datos ficticios o de práctica."
-)
+stroke-width="8" paint-order="stroke" text-anchor
