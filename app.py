@@ -1,4 +1,5 @@
 import random
+import urllib.parse
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -48,6 +49,95 @@ def ir_a(seccion):
     st.session_state.seccion_actual = seccion
 
 
+# ---------------------------------------------------------------
+# Patrón SVG de fondo: niños, jóvenes, adultos, números y letras
+# ---------------------------------------------------------------
+BG_PATTERN_SVG = """
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="520" viewBox="0 0 520 520">
+  <g font-family="sans-serif" font-weight="900" opacity="0.22">
+    <!-- Letras y Números flotantes -->
+    <text x="35" y="65" font-size="38" fill="#FF4D8D" transform="rotate(-12 35 65)">A</text>
+    <text x="235" y="55" font-size="34" fill="#7C4DFF" transform="rotate(10 235 55)">1 2 3</text>
+    <text x="435" y="75" font-size="40" fill="#00B894" transform="rotate(-8 435 75)">B</text>
+    <text x="145" y="165" font-size="36" fill="#FF8A00" transform="rotate(15 145 165)">$10</text>
+    <text x="345" y="185" font-size="38" fill="#29B6F6" transform="rotate(-14 345 185)">C</text>
+    <text x="45" y="295" font-size="36" fill="#8E24AA" transform="rotate(8 45 295)">5 + 5</text>
+    <text x="265" y="305" font-size="42" fill="#FF4D8D" transform="rotate(-10 265 305)">Ñ</text>
+    <text x="450" y="315" font-size="34" fill="#FF8A00" transform="rotate(12 450 315)">$20</text>
+    <text x="140" y="445" font-size="38" fill="#00B894" transform="rotate(-12 140 445)">7</text>
+    <text x="360" y="455" font-size="36" fill="#7C4DFF" transform="rotate(10 360 455)">ABC</text>
+    <text x="470" y="485" font-size="32" fill="#E53935">100%</text>
+  </g>
+
+  <g opacity="0.26">
+    <!-- Niño sonriendo (arriba izquierda) -->
+    <g transform="translate(80, 95)">
+      <circle cx="30" cy="24" r="16" fill="#FFB74D"/>
+      <path d="M14 20 Q30 2 46 20" fill="#4E342E"/>
+      <circle cx="24" cy="23" r="2.2" fill="#263238"/>
+      <circle cx="36" cy="23" r="2.2" fill="#263238"/>
+      <path d="M24 30 Q30 36 36 30" stroke="#263238" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <rect x="14" y="42" width="32" height="30" rx="12" fill="#29B6F6"/>
+      <text x="30" y="62" font-size="14" font-weight="bold" fill="#FFF" text-anchor="middle">123</text>
+    </g>
+
+    <!-- Joven con lentes (arriba derecha) -->
+    <g transform="translate(350, 75)">
+      <circle cx="35" cy="26" r="18" fill="#D7CCC8"/>
+      <path d="M15 24 Q18 4 35 6 Q52 4 55 24 L55 38 L15 38 Z" fill="#3E2723"/>
+      <circle cx="35" cy="27" r="17" fill="#F5CBA7"/>
+      <circle cx="28" cy="26" r="5" stroke="#7C4DFF" stroke-width="2.2" fill="none"/>
+      <circle cx="42" cy="26" r="5" stroke="#7C4DFF" stroke-width="2.2" fill="none"/>
+      <line x1="33" y1="26" x2="37" y2="26" stroke="#7C4DFF" stroke-width="2"/>
+      <path d="M29 34 Q35 39 41 34" stroke="#263238" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <rect x="16" y="46" width="38" height="36" rx="14" fill="#FF4D8D"/>
+    </g>
+
+    <!-- Adulto mayor feliz (centro izquierda) -->
+    <g transform="translate(175, 225)">
+      <circle cx="35" cy="28" r="19" fill="#ECEFF1"/>
+      <circle cx="35" cy="30" r="17" fill="#FFCCBC"/>
+      <circle cx="29" cy="28" r="2.2" fill="#263238"/>
+      <circle cx="41" cy="28" r="2.2" fill="#263238"/>
+      <path d="M28 36 Q35 42 42 36" stroke="#263238" stroke-width="2.3" fill="none" stroke-linecap="round"/>
+      <rect x="14" y="49" width="42" height="38" rx="15" fill="#00B894"/>
+    </g>
+
+    <!-- Niña con coletas (centro derecha) -->
+    <g transform="translate(385, 230)">
+      <circle cx="15" cy="20" r="8" fill="#5D4037"/>
+      <circle cx="55" cy="20" r="8" fill="#5D4037"/>
+      <circle cx="35" cy="26" r="16" fill="#8D5524"/>
+      <circle cx="29" cy="25" r="2.2" fill="#FFF"/>
+      <circle cx="41" cy="25" r="2.2" fill="#FFF"/>
+      <path d="M29 32 Q35 37 41 32" stroke="#FFF" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <rect x="18" y="44" width="34" height="30" rx="12" fill="#FFB300"/>
+    </g>
+
+    <!-- Adulto joven (abajo izquierda) -->
+    <g transform="translate(55, 375)">
+      <circle cx="35" cy="26" r="18" fill="#F8C471"/>
+      <path d="M17 22 Q35 4 53 22" fill="#1B2631"/>
+      <circle cx="29" cy="26" r="2.2" fill="#263238"/>
+      <circle cx="41" cy="26" r="2.2" fill="#263238"/>
+      <path d="M29 34 Q35 39 41 34" stroke="#263238" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <rect x="15" y="46" width="40" height="38" rx="14" fill="#7C4DFF"/>
+    </g>
+
+    <!-- Monedas, estrellas y alcancía -->
+    <circle cx="275" cy="125" r="18" fill="#FFD54F" stroke="#FF8F00" stroke-width="3"/>
+    <text x="275" y="131" font-size="18" font-weight="900" fill="#E65100" text-anchor="middle">$</text>
+
+    <circle cx="260" cy="400" r="20" fill="#FFD54F" stroke="#FF8F00" stroke-width="3"/>
+    <text x="260" y="407" font-size="20" font-weight="900" fill="#E65100" text-anchor="middle">$5</text>
+
+    <polygon points="465,160 470,173 484,173 473,181 477,194 465,186 453,194 457,181 446,173 460,173" fill="#FFB300"/>
+    <polygon points="115,215 119,225 130,225 121,231 124,242 115,235 106,242 109,231 100,225 111,225" fill="#FF4D8D"/>
+  </g>
+</svg>
+"""
+BG_PATTERN_URI = "data:image/svg+xml;utf8," + urllib.parse.quote(BG_PATTERN_SVG)
+
 font_sizes = {"Pequeña": 16, "Mediana": 18, "Grande": 21, "Muy grande": 24}
 font_px = font_sizes[st.session_state.tamano_letra]
 HC = st.session_state.alto_contraste
@@ -56,24 +146,88 @@ if HC:
     app_bg = "#101820"
     fg, card, border = "#FFFFFF", "#202D38", "#FFFFFF"
     btn_bg, btn_fg = "#FFD600", "#000000"
+    main_container_bg = "rgba(16, 24, 32, 0.96)"
 else:
-    app_bg = "linear-gradient(135deg,#FFE3F1 0%,#E4EEFF 30%,#DDFBF0 60%,#FFF3C9 100%)"
+    app_bg = (
+        f'url("{BG_PATTERN_URI}"), '
+        "linear-gradient(135deg,#FFE3F1 0%,#E4EEFF 30%,#DDFBF0 60%,#FFF3C9 100%)"
+    )
     fg, card, border = "#263238", "#FFFFFF", "#CBB8FF"
     btn_bg, btn_fg = "linear-gradient(135deg,#7C4DFF,#00B8A9)", "#FFFFFF"
+    main_container_bg = "rgba(255, 255, 255, 0.78)"
 
 st.markdown(
     f"""
 <style>
 [data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display: none !important; }}
-.stApp {{ background: {app_bg}; background-attachment: fixed; color: {fg}; }}
-html, body, [class*="st-"], p, label, li {{ font-size: {font_px}px; }}
-.block-container {{ max-width: 1180px; padding-top: 1.2rem; padding-bottom: 3rem; }}
-.kikipay-hero {{
-  background: linear-gradient(120deg,#FF4D8D,#FF8A00,#00B894,#6C5CE7);
-  color:#FFFFFF; padding:1.25rem 1.5rem; border-radius:22px; margin-bottom:.8rem;
-  text-shadow: 0 2px 4px rgba(0,0,0,.35); box-shadow: 0 6px 18px rgba(108,92,231,.35);
+.stApp {{
+  background: {app_bg};
+  background-repeat: repeat, no-repeat;
+  background-size: 460px 460px, cover;
+  background-attachment: fixed;
+  color: {fg};
 }}
-.kikipay-hero h1, .kikipay-hero h3, .kikipay-hero p {{ color:#FFFFFF; margin:.2rem 0; }}
+html, body, [class*="st-"], p, label, li {{ font-size: {font_px}px; }}
+.block-container {{
+  max-width: 1180px;
+  padding-top: 1.4rem;
+  padding-bottom: 3rem;
+  background: {main_container_bg};
+  border-radius: 28px;
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 10px 35px rgba(108, 92, 231, 0.14);
+  backdrop-filter: blur(4px);
+}}
+.kikipay-hero {{
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(120deg,#FF4D8D 0%,#FF8A00 35%,#00B894 70%,#6C5CE7 100%);
+  color:#FFFFFF;
+  padding: 1.7rem 2rem;
+  border-radius: 26px;
+  margin-bottom: 1rem;
+  border: 4px solid #FFFFFF;
+  box-shadow: 0 10px 26px rgba(108,92,231,.38);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}}
+.kikipay-hero-text {{
+  flex: 1 1 520px;
+  z-index: 2;
+}}
+.kikipay-title {{
+  font-size: clamp(2.3rem, 4.6vw, 3.6rem) !important;
+  font-weight: 900 !important;
+  line-height: 1.08 !important;
+  letter-spacing: -0.5px;
+  color: #FFFFFF !important;
+  margin: 0 0 0.45rem 0 !important;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.35), 0 0 22px rgba(255, 255, 255, 0.35);
+}}
+.kikipay-hero h3 {{
+  font-size: clamp(1.15rem, 2vw, 1.45rem) !important;
+  font-weight: 700 !important;
+  color: #FFFDE7 !important;
+  margin: 0.25rem 0 !important;
+  text-shadow: 0 2px 5px rgba(0,0,0,.28);
+}}
+.kikipay-hero p {{
+  color: #FFFFFF !important;
+  margin: 0.35rem 0 0 0 !important;
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0,0,0,.28);
+}}
+.kikipay-hero-art {{
+  flex: 0 1 330px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2;
+}}
 [data-testid="stMetric"] {{
   background:{card}; border:2px solid {border};
   border-left: 10px solid #FF6B9D; border-radius:16px; padding:.8rem 1rem;
@@ -283,11 +437,69 @@ def reiniciar_retos():
     st.session_state.reto_celebrado = False
 
 
+# ---------------------------------------------------------------
+# Banner Principal con Título Grande e Ilustración Inclusiva
+# ---------------------------------------------------------------
+HERO_ILLUSTRATION_SVG = """
+<svg viewBox="0 0 320 155" width="320" height="155" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="312" height="147" rx="22" fill="rgba(255,255,255,0.22)" stroke="rgba(255,255,255,0.65)" stroke-width="2.5"/>
+  <!-- Estrellas y símbolos flotantes -->
+  <text x="24" y="34" font-size="20" font-weight="900" fill="#FFF59D">★</text>
+  <text x="148" y="28" font-size="18" font-weight="900" fill="#FFFFFF">1 2 3</text>
+  <text x="275" y="34" font-size="20" font-weight="900" fill="#FFF59D">★</text>
+  <text x="22" y="138" font-size="18" font-weight="900" fill="#FFF59D">A B C</text>
+  <text x="262" y="138" font-size="18" font-weight="900" fill="#FFF59D">$10</text>
+
+  <!-- Moneda grande brillante -->
+  <circle cx="92" cy="40" r="15" fill="#FFD54F" stroke="#FFF" stroke-width="2.5"/>
+  <text x="92" y="45" font-size="15" font-weight="900" fill="#E65100" text-anchor="middle">$</text>
+  <circle cx="228" cy="40" r="15" fill="#FFD54F" stroke="#FFF" stroke-width="2.5"/>
+  <text x="228" y="45" font-size="15" font-weight="900" fill="#E65100" text-anchor="middle">$</text>
+
+  <!-- Personaje 1: Niño alegre -->
+  <g transform="translate(36, 52)">
+    <circle cx="32" cy="24" r="16" fill="#FFCC80"/>
+    <path d="M16 20 Q32 4 48 20" fill="#4E342E"/>
+    <circle cx="27" cy="23" r="2.2" fill="#263238"/>
+    <circle cx="37" cy="23" r="2.2" fill="#263238"/>
+    <path d="M27 30 Q32 35 37 30" stroke="#263238" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <rect x="15" y="42" width="34" height="36" rx="12" fill="#29B6F6" stroke="#FFF" stroke-width="2"/>
+  </g>
+
+  <!-- Personaje 2: Joven con lentes (centro) -->
+  <g transform="translate(118, 42)">
+    <circle cx="42" cy="28" r="20" fill="#3E2723"/>
+    <circle cx="42" cy="30" r="18" fill="#F5CBA7"/>
+    <circle cx="35" cy="29" r="5.5" stroke="#7C4DFF" stroke-width="2.3" fill="none"/>
+    <circle cx="49" cy="29" r="5.5" stroke="#7C4DFF" stroke-width="2.3" fill="none"/>
+    <line x1="40.5" y1="29" x2="43.5" y2="29" stroke="#7C4DFF" stroke-width="2.2"/>
+    <path d="M35 37 Q42 43 49 37" stroke="#263238" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <rect x="20" y="50" width="44" height="44" rx="15" fill="#FF4D8D" stroke="#FFF" stroke-width="2.2"/>
+    <text x="42" y="77" font-size="16" font-weight="900" fill="#FFF" text-anchor="middle">🌈</text>
+  </g>
+
+  <!-- Personaje 3: Adulto / Adulto mayor -->
+  <g transform="translate(214, 48)">
+    <circle cx="34" cy="26" r="18" fill="#ECEFF1"/>
+    <circle cx="34" cy="28" r="16" fill="#8D5524"/>
+    <circle cx="28" cy="27" r="2.2" fill="#FFF"/>
+    <circle cx="40" cy="27" r="2.2" fill="#FFF"/>
+    <path d="M28 34 Q34 39 40 34" stroke="#FFF" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <rect x="15" y="46" width="38" height="40" rx="14" fill="#00B894" stroke="#FFF" stroke-width="2"/>
+  </g>
+</svg>
+"""
+
 saludo_personal = f"¡Hola, {st.session_state.nombre.strip()}! " if st.session_state.nombre.strip() else ""
 st.markdown(
-    f'<div class="kikipay-hero"><h1>🌈 KikiPay Inclusivo</h1>'
+    f'<div class="kikipay-hero">'
+    f'<div class="kikipay-hero-text">'
+    f'<div class="kikipay-title">🌈 KikiPay Inclusivo</div>'
     f"<h3>{saludo_personal}Aprender sobre el dinero, paso a paso y a tu propio ritmo.</h3>"
-    f"<p>Toca cualquier icono grande para entrar directo a esa actividad. No hay prisa.</p></div>",
+    f"<p>Toca cualquier icono grande para entrar directo a esa actividad. No hay prisa.</p>"
+    f"</div>"
+    f'<div class="kikipay-hero-art">{HERO_ILLUSTRATION_SVG}</div>'
+    f"</div>",
     unsafe_allow_html=True,
 )
 
